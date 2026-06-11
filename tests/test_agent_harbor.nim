@@ -9,10 +9,12 @@ suite "nim-agent-harbor":
     let response = client.createTask(CreateTaskRequest(
       tenantId: "acme",
       projectId: "storefront",
-      prompt: @[harborTextBlock("fix tests")],
+      prompt: "fix tests",
       repo: RepoConfig(mode: "git", url: "git@example.com/repo.git", branch: "main"),
       runtime: defaultRuntime(),
-      workspace: WorkspaceConfig(snapshotPreference: @["overlay", "copy"], executionHostId: "executor-a"),
+      workspacePath: "/tmp/repo",
+      workingCopyMode: "git_worktree",
+      executionHostId: "executor-a",
       sandbox: SandboxConfig(
         mode: "static",
         allowNetwork: true,
@@ -32,16 +34,31 @@ suite "nim-agent-harbor":
     check response.sessionIds == @["session-1"]
     check response.links.events.endsWith("/events")
 
+    let camelResponse = taskResponseFromJson(%*{
+      "taskId": "task-camel",
+      "sessionIds": ["session-camel"],
+      "status": "queued"
+    })
+    check camelResponse.taskId == "task-camel"
+    check camelResponse.sessionIds == @["session-camel"]
+
+    let wrappedResponse = taskResponseFromJson(%(
+      "{\"task_id\":\"task-wrapped\",\"session_ids\":[\"session-wrapped\"],\"status\":\"queued\"}"))
+    check wrappedResponse.taskId == "task-wrapped"
+    check wrappedResponse.sessionIds == @["session-wrapped"]
+
     let accepted = client.sendPrompt("session-1", @[harborTextBlock("continue")])
     check accepted.accepted
     check accepted.sessionId == "session-1"
 
   test "task request serializes workspace sandbox delivery and agent settings":
     let node = taskToJson(CreateTaskRequest(
-      prompt: @[harborTextBlock("fix tests")],
+      prompt: "fix tests",
       repo: RepoConfig(mode: "git", url: "git@example.com/repo.git", branch: "main"),
       runtime: defaultRuntime(),
-      workspace: defaultWorkspace(),
+      workspacePath: "/tmp/repo",
+      workingCopyMode: "git_worktree",
+      executionHostId: "executor-a",
       sandbox: defaultSandbox(),
       delivery: DeliveryConfig(mode: "branch", targetBranch: "main"),
       agents: @[AgentConfig(
@@ -52,9 +69,19 @@ suite "nim-agent-harbor":
         acpStdioLaunchCommand: AcpStdioLaunchCommand(binary: "mock-agent", args: @["--stdio"]))],
       output: defaultOutput(),
       labels: newJObject()))
-    check node["workspace"]["snapshotPreference"][0].getStr() == "zfs"
+    check node["prompt"].getStr() == "fix tests"
+    check node["workspace_path"].getStr() == "/tmp/repo"
+    check node["working_copy_mode"].getStr() == "git_worktree"
+    check node["workspace"]["executionHostId"].getStr() == "executor-a"
     check node["sandbox"]["debug"].getBool()
+    check node["sandbox"]["mode"].getStr() == "dynamic"
+    check not node["sandbox"].hasKey("tmpfs-size")
+    check not node["sandbox"].hasKey("limits")
+    check not node["sandbox"].hasKey("allow-network")
     check node["delivery"]["mode"].getStr() == "branch"
+    check node["agents"][0]["type"].getStr() == "acp"
+    check node["agents"][0]["version"].getStr() == "latest"
+    check node["agents"][0]["settings"]["model"].getStr() == "mock"
     check node["agents"][0]["settings"]["temperature"].getInt() == 0
     check node["agents"][0]["acpStdioLaunchCommand"]["binary"].getStr() == "mock-agent"
 
@@ -84,6 +111,19 @@ suite "nim-agent-harbor":
     check history.events[0].filePath == "src/app.nim"
     check history.events[1].kind == hekToolResult
     check history.oldestTimestamp == 1714300002
+
+    let wrappedHistory = eventHistoryFromJson(%(
+      "{\"events\":[{\"type\":\"diff\",\"file_path\":\"src/app.nim\"}],\"has_more\":false,\"total_count\":1}"))
+    check wrappedHistory.events.len == 1
+    check wrappedHistory.events[0].kind == hekDiff
+    check wrappedHistory.events[0].filePath == "src/app.nim"
+    check wrappedHistory.totalCount == 1
+
+    let arrayHistory = eventHistoryFromJson(%*[
+      {"type": "workspace", "mountPath": "/tmp/agent"}
+    ])
+    check arrayHistory.events.len == 1
+    check arrayHistory.events[0].kind == hekWorkspace
 
   test "SSE data lines parse as typed events":
     let events = parseSseEvents("event: message\ndata: {\"type\":\"log\",\"message\":\"Running tests\",\"ts\":\"now\"}\n\n")

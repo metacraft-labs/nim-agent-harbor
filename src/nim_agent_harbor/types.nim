@@ -80,10 +80,12 @@ type
   CreateTaskRequest* = object
     tenantId*: string
     projectId*: string
-    prompt*: seq[HarborContentBlock]
+    prompt*: string
     repo*: RepoConfig
     runtime*: RuntimeConfig
-    workspace*: WorkspaceConfig
+    workspacePath*: string
+    workingCopyMode*: string
+    executionHostId*: string
     sandbox*: SandboxConfig
     delivery*: DeliveryConfig
     agents*: seq[AgentConfig]
@@ -218,29 +220,65 @@ proc contentBlockFromJson*(node: JsonNode): HarborContentBlock =
   result.data = node{"data"}.getStr("")
 
 proc taskToJson*(req: CreateTaskRequest): JsonNode =
-  var prompt = newJArray()
-  for item in req.prompt:
-    prompt.add contentBlockToJson(item)
   var agents = newJArray()
   for agent in req.agents:
+    let settings =
+      if agent.settings.isNil: newJObject()
+      else: agent.settings.copy()
+    if agent.model.len > 0:
+      settings["model"] = %agent.model
     var agentNode = %*{
-      "agent": {"software": agent.agent.software, "version": agent.agent.version},
-      "model": agent.model,
+      "type": agent.agent.software,
+      "version": agent.agent.version,
       "count": agent.count,
-      "settings": agent.settings
+      "settings": settings
     }
     if agent.displayName.len > 0:
-      agentNode["displayName"] = %agent.displayName
+      agentNode["display_name"] = %agent.displayName
     if agent.acpStdioLaunchCommand.binary.len > 0:
       agentNode["acpStdioLaunchCommand"] = %*{
         "binary": agent.acpStdioLaunchCommand.binary,
         "args": agent.acpStdioLaunchCommand.args
       }
     agents.add agentNode
+  var sandbox = newJObject()
+  if req.sandbox.mode.len > 0:
+    sandbox["mode"] = %req.sandbox.mode
+  if req.sandbox.allowNetwork:
+    sandbox["allow-network"] = %req.sandbox.allowNetwork
+  if req.sandbox.containers:
+    sandbox["containers"] = %req.sandbox.containers
+  if req.sandbox.vm:
+    sandbox["vm"] = %req.sandbox.vm
+  if req.sandbox.allowKvm:
+    sandbox["allow-kvm"] = %req.sandbox.allowKvm
+  if req.sandbox.debug:
+    sandbox["debug"] = %req.sandbox.debug
+  if req.sandbox.rwPaths.len > 0:
+    sandbox["rw-paths"] = %req.sandbox.rwPaths
+  if req.sandbox.overlayPaths.len > 0:
+    sandbox["overlay-paths"] = %req.sandbox.overlayPaths
+  if req.sandbox.blacklistPaths.len > 0:
+    sandbox["blacklist-paths"] = %req.sandbox.blacklistPaths
+  if req.sandbox.tmpfsSize.len > 0:
+    sandbox["tmpfs-size"] = %req.sandbox.tmpfsSize
+  var limits = newJObject()
+  if req.sandbox.limits.pidsMax != 0:
+    limits["pids-max"] = %req.sandbox.limits.pidsMax
+  if req.sandbox.limits.memoryMax.len > 0:
+    limits["memory-max"] = %req.sandbox.limits.memoryMax
+  if req.sandbox.limits.memoryHigh.len > 0:
+    limits["memory-high"] = %req.sandbox.limits.memoryHigh
+  if req.sandbox.limits.cpuMax.len > 0:
+    limits["cpu-max"] = %req.sandbox.limits.cpuMax
+  if req.sandbox.limits.ioMax.len > 0:
+    limits["io-max"] = %req.sandbox.limits.ioMax
+  if limits.len > 0:
+    sandbox["limits"] = limits
   result = %*{
     "tenantId": req.tenantId,
     "projectId": req.projectId,
-    "prompt": prompt,
+    "prompt": req.prompt,
     "repo": {
       "mode": req.repo.mode,
       "url": req.repo.url,
@@ -251,30 +289,6 @@ proc taskToJson*(req: CreateTaskRequest): JsonNode =
       "type": req.runtime.kind,
       "devcontainerPath": req.runtime.devcontainerPath,
       "resources": {"cpu": req.runtime.cpu, "memoryMiB": req.runtime.memoryMiB}
-    },
-    "workspace": {
-      "snapshotPreference": req.workspace.snapshotPreference,
-      "executionHostId": req.workspace.executionHostId,
-      "workingCopyMode": req.workspace.workingCopyMode
-    },
-    "sandbox": {
-      "mode": req.sandbox.mode,
-      "allow-network": req.sandbox.allowNetwork,
-      "containers": req.sandbox.containers,
-      "vm": req.sandbox.vm,
-      "allow-kvm": req.sandbox.allowKvm,
-      "debug": req.sandbox.debug,
-      "rw-paths": req.sandbox.rwPaths,
-      "overlay-paths": req.sandbox.overlayPaths,
-      "blacklist-paths": req.sandbox.blacklistPaths,
-      "tmpfs-size": req.sandbox.tmpfsSize,
-      "limits": {
-        "pids-max": req.sandbox.limits.pidsMax,
-        "memory-max": req.sandbox.limits.memoryMax,
-        "memory-high": req.sandbox.limits.memoryHigh,
-        "cpu-max": req.sandbox.limits.cpuMax,
-        "io-max": req.sandbox.limits.ioMax
-      }
     },
     "agents": agents,
     "output": {
@@ -288,6 +302,14 @@ proc taskToJson*(req: CreateTaskRequest): JsonNode =
     },
     "labels": req.labels
   }
+  if sandbox.len > 0:
+    result["sandbox"] = sandbox
+  if req.workspacePath.len > 0:
+    result["workspace_path"] = %req.workspacePath
+  if req.workingCopyMode.len > 0:
+    result["working_copy_mode"] = %req.workingCopyMode
+  if req.executionHostId.len > 0:
+    result["workspace"] = %*{"executionHostId": req.executionHostId}
   if req.llmProvider.apiStyle.len > 0:
     result["llmProvider"] = %*{
       "apiStyle": req.llmProvider.apiStyle,
@@ -297,14 +319,25 @@ proc taskToJson*(req: CreateTaskRequest): JsonNode =
     }
 
 proc taskResponseFromJson*(node: JsonNode): CreateTaskResponse =
-  result.taskId = node{"task_id"}.getStr("")
-  result.status = node{"status"}.getStr("")
-  for idNode in node{"session_ids"}.items:
+  let responseNode =
+    if node.kind == JString:
+      parseJson(node.getStr())
+    else:
+      node
+  result.taskId =
+    if responseNode.hasKey("task_id"): responseNode["task_id"].getStr("")
+    else: responseNode{"taskId"}.getStr("")
+  result.status = responseNode{"status"}.getStr("")
+  let sessionIdsNode =
+    if responseNode.hasKey("session_ids"): responseNode["session_ids"]
+    elif responseNode.hasKey("sessionIds"): responseNode["sessionIds"]
+    else: newJArray()
+  for idNode in sessionIdsNode.items:
     result.sessionIds.add idNode.getStr("")
   result.links = LinkSet(
-    self: node{"links"}{"self"}.getStr(""),
-    events: node{"links"}{"events"}.getStr(""),
-    logs: node{"links"}{"logs"}.getStr(""))
+    self: responseNode{"links"}{"self"}.getStr(""),
+    events: responseNode{"links"}{"events"}.getStr(""),
+    logs: responseNode{"links"}{"logs"}.getStr(""))
 
 proc promptAcceptedFromJson*(node: JsonNode): PromptAcceptedResponse =
   PromptAcceptedResponse(
@@ -321,7 +354,7 @@ proc eventFromJson*(node: JsonNode): HarborEvent =
   of "tool_result": result.kind = hekToolResult
   of "file_edit": result.kind = hekFileEdit
   of "diff": result.kind = hekDiff
-  of "workspace": result.kind = hekWorkspace
+  of "workspace", "workspace_ready": result.kind = hekWorkspace
   of "delivery": result.kind = hekDelivery
   of "llm_request": result.kind = hekLlmRequest
   of "sub_agent": result.kind = hekSubAgent
@@ -335,9 +368,12 @@ proc eventFromJson*(node: JsonNode): HarborEvent =
   result.filePath = node{"file_path"}.getStr(node{"path"}.getStr(""))
   result.linesAdded = node{"lines_added"}.getInt(0)
   result.linesRemoved = node{"lines_removed"}.getInt(0)
-  result.mountPath = node{"mountPath"}.getStr("")
+  result.mountPath = node{"mountPath"}.getStr(node{"mount_path"}.getStr(
+    node{"workspace_path"}.getStr(""))
+  )
   result.provider = node{"provider"}.getStr("")
-  result.workingCopyMode = node{"workingCopyMode"}.getStr("")
+  result.workingCopyMode = node{"workingCopyMode"}.getStr(
+    node{"working_copy_mode"}.getStr(""))
   result.deliveryMode = node{"mode"}.getStr("")
   result.deliveryUrl = node{"url"}.getStr("")
   result.ts = node{"ts"}.getStr("")
@@ -345,8 +381,23 @@ proc eventFromJson*(node: JsonNode): HarborEvent =
   result.raw = node
 
 proc eventHistoryFromJson*(node: JsonNode): EventHistoryResponse =
-  for item in node{"events"}.items:
+  let historyNode =
+    if node.kind == JString:
+      parseJson(node.getStr())
+    else:
+      node
+  let eventsNode =
+    if historyNode.kind == JArray:
+      historyNode
+    elif historyNode.kind == JObject and historyNode.hasKey("events"):
+      historyNode["events"]
+    else:
+      newJArray()
+  for item in eventsNode.items:
     result.events.add eventFromJson(item)
-  result.hasMore = node{"has_more"}.getBool(false)
-  result.oldestTimestamp = node{"oldest_timestamp"}.getBiggestInt(0)
-  result.totalCount = node{"total_count"}.getInt(0)
+  result.hasMore = historyNode{"has_more"}.getBool(
+    historyNode{"hasMore"}.getBool(false))
+  result.oldestTimestamp = historyNode{"oldest_timestamp"}.getBiggestInt(
+    historyNode{"oldestTimestamp"}.getBiggestInt(0))
+  result.totalCount = historyNode{"total_count"}.getInt(
+    historyNode{"totalCount"}.getInt(result.events.len))
