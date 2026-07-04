@@ -1,0 +1,9 @@
+schema = "reprobuild.solved-graph-lock.v2"
+
+[lock]
+platform = "amd64-linux"
+optimal = false
+inputs_digest = "fnv1a64:529401a5d43048ac"
+variants = []
+packages = [{ name = "gcc", version = "12.0.0", source = "gcc" }, { name = "nim", version = "2.0.0", source = "nim" }, { name = "nim-everywhere", version = "1.0.0", source = "nim-everywhere" }, { name = "nim_agent_harbor", version = "0.1.0", source = "nim_agent_harbor" }, { name = "nim_everywhere", version = "0.1.0", source = "nim_everywhere" }]
+deps = [{ name = "nim-agent-harbor", path = ".", coord_kind = "vcs", url = "", ref = "mcr-stege0-and-fixes", revision = "93baaf91add2db32aba7215d538b4b15167d088a", integrity = "git-sha1:93baaf91add2db32aba7215d538b4b15167d088a", version = "", visibility = "public", participation = "", depends = "nim-everywhere", groups = "" }, { name = "nim-everywhere", path = "../nim-everywhere", coord_kind = "vcs", url = "", ref = "mcr-stege0-and-fixes", revision = "015a410ebd4257b0b0e5772a0a94e446a505f9b7", integrity = "git-sha1:015a410ebd4257b0b0e5772a0a94e446a505f9b7", version = "", visibility = "public", participation = "", depends = "", groups = "" }]
