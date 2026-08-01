@@ -50,6 +50,54 @@ proc historyPath(sessionId: string; query: EventHistoryQuery): string =
     parts.add "before=" & $query.before
   "/api/v1/sessions/" & sessionId & "/events/history" & queryJoin(parts)
 
+type
+  HarborTaskReport* = object
+    ## Snapshot of a Harbor task's server-side state used by the
+    ## codetracer ViewModel to refresh per-session entries after the
+    ## workspace provisioning step lands or the agent's lifecycle
+    ## transitions. ``raw`` is the unparsed JSON body so callers can
+    ## reach into provider-specific fields without forcing the
+    ## structured surface to grow ahead of upstream.
+    taskId*: string
+    sessionIds*: seq[string]
+    workspacePath*: string
+    workingCopyMode*: string
+    status*: string
+    raw*: JsonNode
+
+proc fetchTaskReport*(client: HarborClient; sessionId: string): HarborTaskReport =
+  ## Pull the latest server-side state for ``sessionId``. Returns a
+  ## minimally-populated report (only ``sessionId``-derived fields) on
+  ## error so callers don't have to special-case missing data.
+  result.sessionIds = @[sessionId]
+  let response = client.transport.request(newRequest(
+    hmGet,
+    client.baseUrl & "/api/v1/sessions/" & sessionId & "/report",
+    "",
+    @[header("Accept", "application/json")] & client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    return
+  let parsed = parseJson(response.body)
+  result.raw = parsed
+  result.taskId = parsed{"taskId"}.getStr(
+    parsed{"task_id"}.getStr(""))
+  let sessionIds =
+    if parsed.hasKey("sessionIds"): parsed{"sessionIds"}
+    else: parsed{"session_ids"}
+  if not sessionIds.isNil and sessionIds.kind == JArray:
+    result.sessionIds.setLen(0)
+    for item in sessionIds:
+      let id = item.getStr("")
+      if id.len > 0:
+        result.sessionIds.add id
+  if result.sessionIds.len == 0:
+    result.sessionIds = @[sessionId]
+  result.workspacePath = parsed{"workspacePath"}.getStr(
+    parsed{"workspace_path"}.getStr(""))
+  result.workingCopyMode = parsed{"workingCopyMode"}.getStr(
+    parsed{"working_copy_mode"}.getStr(""))
+  result.status = parsed{"status"}.getStr("")
+
 proc createTask*(client: HarborClient; req: CreateTaskRequest): CreateTaskResponse =
   let response = client.transport.request(newRequest(
     hmPost,

@@ -31,6 +31,16 @@ proc fakeHarborTransport*(): HttpTransport =
         "oldest_timestamp": 1714300002,
         "total_count": 2
       }))
+    if req.httpMethod == hmGet and
+        req.url.endsWith("/api/v1/sessions/session-1/report"):
+      return HttpResponse(status: 200, body: $(%*{
+        "taskId": "task-1",
+        "sessionIds": ["session-1", "session-2"],
+        "workspacePath": "/tmp/ah-workspace",
+        "workingCopyMode": "git_worktree",
+        "status": "running",
+        "providerState": {"host": "executor-a"}
+      }))
     if req.httpMethod == hmGet and req.url.contains("/api/v1/sessions/session-1/events"):
       return HttpResponse(status: 200, body:
         "event: message\n" &

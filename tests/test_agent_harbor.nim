@@ -125,6 +125,18 @@ suite "nim-agent-harbor":
     check arrayHistory.events.len == 1
     check arrayHistory.events[0].kind == hekWorkspace
 
+  test "reads the latest task report for a session":
+    let client = newHarborClient("http://localhost:18080",
+      fakeHarborTransport())
+    let report = client.fetchTaskReport("session-1")
+
+    check report.taskId == "task-1"
+    check report.sessionIds == @["session-1", "session-2"]
+    check report.workspacePath == "/tmp/ah-workspace"
+    check report.workingCopyMode == "git_worktree"
+    check report.status == "running"
+    check report.raw{"providerState", "host"}.getStr() == "executor-a"
+
   test "SSE data lines parse as typed events":
     let events = parseSseEvents("event: message\ndata: {\"type\":\"log\",\"message\":\"Running tests\",\"ts\":\"now\"}\n\n")
     check events.len == 1
