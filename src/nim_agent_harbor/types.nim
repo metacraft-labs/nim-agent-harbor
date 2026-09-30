@@ -77,6 +77,16 @@ type
     baseUrl*: string
     apiKey*: string
     model*: string
+  CreateSessionRequest* = object
+    prompt*: string
+    workspacePath*: string
+    agent*: AgentConfig
+    output*: OutputConfig
+    sandbox*: SandboxConfig
+    labels*: JsonNode
+  CreateSessionResponse* = object
+    sessionId*: string
+    status*: string
   CreateTaskRequest* = object
     tenantId*: string
     projectId*: string
@@ -302,6 +312,8 @@ proc taskToJson*(req: CreateTaskRequest): JsonNode =
     },
     "labels": req.labels
   }
+  # Optional URLs must be absent, not empty strings: Harbor parses them as URLs.
+  if req.repo.url.len == 0: result["repo"].delete("url")
   if sandbox.len > 0:
     result["sandbox"] = sandbox
   if req.workspacePath.len > 0:
@@ -317,6 +329,22 @@ proc taskToJson*(req: CreateTaskRequest): JsonNode =
       "apiKey": req.llmProvider.apiKey,
       "model": req.llmProvider.model
     }
+
+proc sessionToJson*(req: CreateSessionRequest): JsonNode =
+  ## Reuse the canonical agent/sandbox wire encoding without creating a task.
+  let common = taskToJson(CreateTaskRequest(agents: @[req.agent],
+    sandbox: req.sandbox, output: req.output))
+  result = %*{"prompt": req.prompt, "workspace_path": req.workspacePath,
+    "agent": common["agents"][0], "output": common["output"],
+    "sandbox": common{"sandbox"}}
+  if not req.labels.isNil:
+    result["labels"] = req.labels.copy()
+
+proc sessionResponseFromJson*(node: JsonNode): CreateSessionResponse =
+  result = CreateSessionResponse(sessionId: node{"session_id"}.getStr(""),
+    status: node{"status"}.getStr(""))
+  if result.sessionId.len == 0:
+    raise newException(HarborError, "Harbor session creation returned no session_id")
 
 proc taskResponseFromJson*(node: JsonNode): CreateTaskResponse =
   let responseNode =

@@ -1,9 +1,25 @@
+## The fake HTTP peer isolates serialization and error handling without model/network
+## nondeterminism. These are protocol unit tests, not live Harbor E2E evidence.
 import std/json
 import std/strutils
 import unittest
 import nim_agent_harbor
 
 suite "nim-agent-harbor":
+  test "standalone session wire contract is distinct from task creation":
+    let node = sessionToJson(CreateSessionRequest(prompt: "first user turn",
+      workspacePath: "/work/project", agent: defaultAgent(), output: defaultOutput(),
+      sandbox: defaultSandbox()))
+    check node["prompt"].getStr() == "first user turn"
+    check node["workspace_path"].getStr() == "/work/project"
+    check node["output"]["nonInteractive"].getBool() == false
+    check node.hasKey("agent")
+    check not node.hasKey("agents")
+    check not node.hasKey("task_id")
+    check sessionResponseFromJson(%*{"session_id": "real", "status": "queued"}).sessionId == "real"
+    expect HarborError:
+      discard sessionResponseFromJson(%*{"task_id": "not-a-session"})
+
   test "agent_harbor_client_task_request_roundtrip":
     let client = newHarborClient("http://localhost:18080", fakeHarborTransport(), apiKeyAuth("test"))
     let response = client.createTask(CreateTaskRequest(

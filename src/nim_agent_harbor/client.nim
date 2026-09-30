@@ -4,10 +4,13 @@ import nim_everywhere
 import nim_agent_harbor/types
 
 type
+  HarborStreamCallback* = proc(event: HarborEvent; cursor: string): bool {.closure.}
+  HarborStreamTransport* = proc(request: HttpRequest; onEvent: HarborStreamCallback) {.closure.}
   HarborClient* = object
     baseUrl*: string
     auth*: HarborAuth
     transport*: HttpTransport
+    streamTransport*: HarborStreamTransport
 
 proc authHeaders*(auth: HarborAuth): seq[HttpHeader] =
   case auth.kind
@@ -108,15 +111,28 @@ proc createTask*(client: HarborClient; req: CreateTaskRequest): CreateTaskRespon
     raise newException(HarborError, response.body)
   taskResponseFromJson(parseJson(response.body))
 
+proc createSession*(client: HarborClient; req: CreateSessionRequest): CreateSessionResponse =
+  ## Create a standalone session with its first user prompt, not an orchestration task.
+  if req.prompt.strip().len == 0:
+    raise newException(HarborError, "Harbor session creation requires an initial prompt")
+  let response = client.transport.request(newRequest(
+    hmPost, client.baseUrl & "/api/v1/sessions", $sessionToJson(req),
+    @[header("Content-Type", "application/json; charset=utf-8")] & client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, response.body)
+  sessionResponseFromJson(parseJson(response.body))
+
 proc sendPrompt*(client: HarborClient; sessionId: string;
     prompt: seq[HarborContentBlock]): PromptAcceptedResponse =
-  var blocks = newJArray()
+  var text: seq[string] = @[]
   for item in prompt:
-    blocks.add contentBlockToJson(item)
+    if item.kind != hcbText:
+      raise newException(HarborError, "Harbor REST prompts currently accept text only")
+    text.add item.text
   let response = client.transport.request(newRequest(
     hmPost,
     client.baseUrl & "/api/v1/sessions/" & sessionId & "/prompt",
-    $(%*{"prompt": blocks}),
+    $(%*{"prompt": text.join("\n")}),
     @[header("Content-Type", "application/json; charset=utf-8")] & client.auth.authHeaders()))
   if response.status < 200 or response.status >= 300:
     raise newException(HarborError, response.body)
@@ -177,3 +193,23 @@ proc parseSseEvents*(sseText: string): seq[HarborEvent] =
       dataLines.add line[5 .. ^1].strip()
   flush()
   events
+
+proc streamSessionEvents*(client: HarborClient; sessionId: string;
+    onEvent: HarborStreamCallback; after = "") =
+  ## Follow the durable event stream, stopping when the consumer returns false.
+  ## A cursor belongs to one session and is supplied again on the next turn.
+  if client.streamTransport == nil:
+    for event in client.readSessionEvents(sessionId):
+      if not onEvent(event, ""): break
+    return
+  var headers = @[header("Accept", "text/event-stream")] & client.auth.authHeaders()
+  if after.len > 0: headers.add header("Last-Event-ID", after)
+  client.streamTransport(newRequest(hmGet,
+    client.baseUrl & "/api/v1/sessions/" & sessionId & "/events", "", headers), onEvent)
+
+proc stopSession*(client: HarborClient; sessionId: string) =
+  let response = client.transport.request(newRequest(hmPost,
+    client.baseUrl & "/api/v1/sessions/" & sessionId & "/stop", "{}",
+    @[header("Content-Type", "application/json")] & client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, response.body)
