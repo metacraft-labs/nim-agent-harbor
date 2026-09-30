@@ -104,11 +104,14 @@ type
     source: string
     binary: string
 
-# The corpus — the single standalone ``tests/*.nim`` test file. It compiles
+# The corpus includes portable protocol assertions and a native real-TCP
+# control-deadline suite. The latter is deliberately outside the JS gate. It compiles
 # + runs to exit 0 on every host (pure ``std/json`` + ``std/strutils`` +
 # ``unittest`` + ``nim_agent_harbor``/``nim_everywhere`` — no OS gate), so
 # there is one unconditional edge and no per-OS partition.
 const portableTestSpecs: seq[AgentHarborTestSpec] = @[
+  AgentHarborTestSpec(source: "tests/test_native_deadlines.nim",
+    binary: "build/test-bin/test_native_deadlines"),
   AgentHarborTestSpec(source: "tests/test_agent_harbor.nim",
     binary: "build/test-bin/test_agent_harbor"),
 ]

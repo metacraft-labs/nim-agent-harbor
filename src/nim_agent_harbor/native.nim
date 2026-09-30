@@ -1,6 +1,6 @@
 ## Native HTTP and incremental SSE transports. Each operation owns its HTTP
 ## client so prompt delivery and cancellation can run on separate threads.
-import std/[httpclient, httpcore, asyncdispatch, asyncstreams, json, strutils]
+import std/[httpclient, httpcore, asyncdispatch, asyncnet, asyncstreams, json, strutils]
 import nim_everywhere
 import ./[client, types]
 
@@ -10,13 +10,31 @@ proc requestHeaders(req: nim_everywhere.HttpRequest): HttpHeaders =
 
 proc nativeHarborTransport*(timeoutMs = 30_000): HttpTransport =
   result = proc(req: nim_everywhere.HttpRequest): nim_everywhere.HttpResponse =
-    let http = newHttpClient(timeout = timeoutMs)
-    defer: http.close()
-    let resp = http.request(req.url, httpMethod = parseEnum[httpcore.HttpMethod]($req.httpMethod),
-      body = req.body, headers = requestHeaders(req))
-    result.status = int(resp.code)
-    result.body = resp.body
-    for name, value in resp.headers: result.headers.add header(name, value)
+    proc control(): Future[nim_everywhere.HttpResponse] {.async.} =
+      let http = newAsyncHttpClient()
+      defer: http.close()
+      proc exchange(): Future[nim_everywhere.HttpResponse] {.async.} =
+        let resp = await http.request(req.url,
+          httpMethod = parseEnum[httpcore.HttpMethod]($req.httpMethod),
+          body = req.body, headers = requestHeaders(req))
+        result.status = int(resp.code)
+        result.body = await resp.body
+        for name, value in resp.headers: result.headers.add header(name, value)
+      let pending = exchange()
+      if timeoutMs < 0: return await pending
+      if not (await asyncdispatch.withTimeout(pending, timeoutMs)):
+        # Closing the socket cancels pending headers/body reads. Do not leave
+        # a timed-out request running on the worker's event dispatcher.
+        # Close/unregister the socket explicitly, including a connection
+        # which has not yet reached HttpClient.connected. Never await the
+        # discarded read future: Nim does not resolve it after unregistering.
+        # It has no remaining socket/event source and is local to this call.
+        let socket = http.getSocket()
+        if socket != nil: socket.close()
+        http.close()
+        raise newException(HarborError, "Harbor control request deadline exceeded")
+      return await pending
+    waitFor control()
 
 proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
   result = proc(req: nim_everywhere.HttpRequest; onEvent: HarborStreamCallback) =
