@@ -6,6 +6,7 @@ paths := "--path:src --path:../nim-everywhere/src"
 build: check-dependencies build-native build-js
 
 build-native:
+    nim c --threads:on -d:futureLogging {{paths}} tests/test_native_stream_lifecycle.nim
     nim c {{paths}} tests/test_agent_harbor.nim
     nim c --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c {{paths}} tests/test_nimcache_is_worktree_local.nim
@@ -16,6 +17,7 @@ build-js:
 test: check-dependencies test-native test-js
 
 test-native:
+    nim c -r --threads:on -d:futureLogging {{paths}} tests/test_native_stream_lifecycle.nim
     nim c -r {{paths}} tests/test_agent_harbor.nim
     nim c -r --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c -r {{paths}} tests/test_nimcache_is_worktree_local.nim
@@ -29,6 +31,7 @@ check-dependencies:
     bash tools/check-dependencies.sh
 
 lint-nim:
+    nim check --threads:on -d:futureLogging {{paths}} tests/test_native_stream_lifecycle.nim
     nim check {{paths}} tests/test_agent_harbor.nim
     nim check --threads:on {{paths}} tests/test_native_deadlines.nim
     nim check {{paths}} tests/test_nimcache_is_worktree_local.nim

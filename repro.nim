@@ -110,6 +110,8 @@ type
 # ``unittest`` + ``nim_agent_harbor``/``nim_everywhere`` — no OS gate), so
 # there is one unconditional edge and no per-OS partition.
 const portableTestSpecs: seq[AgentHarborTestSpec] = @[
+  AgentHarborTestSpec(source: "tests/test_native_stream_lifecycle.nim",
+    binary: "build/test-bin/test_native_stream_lifecycle"),
   AgentHarborTestSpec(source: "tests/test_native_deadlines.nim",
     binary: "build/test-bin/test_native_deadlines"),
   AgentHarborTestSpec(source: "tests/test_agent_harbor.nim",
@@ -174,6 +176,8 @@ package nim_agent_harbor:
         source = source,
         binary = binary,
         paths = @["src"],
+        defines = (if source == "tests/test_native_stream_lifecycle.nim":
+          @["futureLogging"] else: @[]),
         actionId = "nim_agent_harbor.test_build." & stem,
         extraInputs = @["src", "nim_agent_harbor.nimble"])
       buildActions.add(edge.action)
