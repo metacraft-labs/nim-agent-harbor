@@ -115,6 +115,10 @@ type
     sessionId*: string
     accepted*: bool
     ts*: string
+    operationId*, deliveryState*, stopReason*: string
+    noOperation*, operationIdPresent*, operationIdNull*, deliveryStatePresent*, deliveryStateNull*: bool
+    deliveryStateType*: string
+    limitChars*, usedChars*, currentChars*, remainingChars*, overLimitBy*: int
   HarborEventKind* = enum
     hekLog = "log"
     hekThought = "thought"
@@ -368,10 +372,37 @@ proc taskResponseFromJson*(node: JsonNode): CreateTaskResponse =
     logs: responseNode{"links"}{"logs"}.getStr(""))
 
 proc promptAcceptedFromJson*(node: JsonNode): PromptAcceptedResponse =
-  PromptAcceptedResponse(
+  result = PromptAcceptedResponse(
     sessionId: node{"sessionId"}.getStr(""),
     accepted: node{"accepted"}.getBool(false),
-    ts: node{"ts"}.getStr(""))
+    ts: node{"ts"}.getStr(""),
+    operationId: node{"operationId"}.getStr(""),
+    operationIdPresent: node.kind == JObject and node.hasKey("operationId"),
+    operationIdNull: node{"operationId"} != nil and node["operationId"].kind == JNull,
+    deliveryState: node{"deliveryState"}.getStr(""),
+    deliveryStatePresent: node.kind == JObject and node.hasKey("deliveryState"),
+    deliveryStateNull: node{"deliveryState"} != nil and node["deliveryState"].kind == JNull,
+    deliveryStateType: (if node{"deliveryState"} == nil: "absent" else: $node["deliveryState"].kind),
+    stopReason: node{"stopReason"}.getStr(""),
+    limitChars: node{"limitChars"}.getInt(-1),
+    usedChars: node{"usedChars"}.getInt(-1),
+    currentChars: node{"currentChars"}.getInt(-1),
+    remainingChars: node{"remainingChars"}.getInt(-1),
+    overLimitBy: node{"overLimitBy"}.getInt(-1))
+  # The public REST serializer omits operationId when no operation exists.
+  # Absence alone is not an admission boundary: require a complete, internally
+  # consistent quota rejection and no delivery identity/state. Explicit empty
+  # strings remain uncertain, rather than being treated as null.
+  let noIdentity = not result.operationIdPresent or node["operationId"].kind == JNull
+  let quotaValid = result.limitChars > 0 and result.currentChars >= 0 and
+    result.remainingChars >= 0 and result.usedChars > result.limitChars and
+    result.overLimitBy == result.usedChars - result.limitChars and
+    result.usedChars >= result.currentChars and
+    (result.remainingChars == max(0, result.limitChars - result.currentChars) or
+      (result.currentChars == 0 and result.remainingChars == 0))
+  result.noOperation = node{"accepted"} != nil and node["accepted"].kind == JBool and
+    not result.accepted and result.sessionId.len > 0 and result.stopReason == "context_limit" and
+    noIdentity and (not result.deliveryStatePresent or node["deliveryState"].kind == JNull) and quotaValid
 
 proc eventFromJson*(node: JsonNode): HarborEvent =
   let kind = node{"type"}.getStr("unknown")

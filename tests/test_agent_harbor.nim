@@ -67,6 +67,47 @@ suite "nim-agent-harbor":
     check accepted.accepted
     check accepted.sessionId == "session-1"
 
+  test "prompt rejection preserves actual Unicode budget and durable boundary metadata":
+    let rejected = promptAcceptedFromJson(%* {"sessionId":"live", "accepted":false,
+      "operationId":newJNull(), "stopReason":"context_limit", "limitChars":16000,
+      "currentChars":12000, "remainingChars":4000, "usedChars":16004, "overLimitBy":4})
+    check not rejected.accepted
+    check rejected.operationId == ""
+    check rejected.noOperation
+    check rejected.stopReason == "context_limit"
+    check rejected.limitChars == 16000
+    check rejected.currentChars == 12000
+    check rejected.remainingChars == 4000
+    check rejected.usedChars == 16004
+    check rejected.overLimitBy == 4
+    check rejected.operationIdPresent
+    var omitted = %* {"sessionId":"live", "accepted":false,
+      "stopReason":"context_limit", "limitChars":16000, "currentChars":12000,
+      "remainingChars":4000, "usedChars":16004, "overLimitBy":4}
+    check promptAcceptedFromJson(omitted).noOperation
+    check not promptAcceptedFromJson(omitted).operationIdPresent
+    let noSession = parseJson($omitted)
+    noSession.delete("sessionId")
+    check not promptAcceptedFromJson(noSession).noOperation
+    for malformed in [%42, %true, %* {"unexpected":"object"}, %""]:
+      let invalid = parseJson($omitted)
+      invalid["deliveryState"] = malformed
+      check not promptAcceptedFromJson(invalid).noOperation
+      check promptAcceptedFromJson(invalid).deliveryStatePresent
+    let nullState = parseJson($omitted)
+    nullState["deliveryState"] = newJNull()
+    check promptAcceptedFromJson(nullState).noOperation
+    omitted["remainingChars"] = %3999
+    check not promptAcceptedFromJson(omitted).noOperation
+    let uncertain = promptAcceptedFromJson(%* {"accepted":false, "operationId":"actual-operation",
+      "deliveryState":"uncertain", "stopReason":"delivery_uncertain"})
+    check not uncertain.noOperation
+    check uncertain.operationId == "actual-operation"
+    check uncertain.deliveryState == "uncertain"
+    check uncertain.remainingChars == -1
+    check not promptAcceptedFromJson(%* {"accepted":false,"stopReason":"context_limit"}).noOperation
+    check not promptAcceptedFromJson(%* {"accepted":false,"operationId":"","stopReason":"context_limit"}).noOperation
+
   test "task request serializes workspace sandbox delivery and agent settings":
     let node = taskToJson(CreateTaskRequest(
       prompt: "fix tests",
