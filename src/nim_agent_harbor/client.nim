@@ -12,7 +12,7 @@ type
 proc authHeaders*(auth: HarborAuth): seq[HttpHeader] =
   case auth.kind
   of akNone: @[]
-  of akApiKey: @[header("X-API-Key", auth.token)]
+  of akApiKey: @[header("Authorization", "ApiKey " & auth.token)]
   of akBearer: @[header("Authorization", "Bearer " & auth.token)]
 
 proc newHarborClient*(baseUrl: string; transport: HttpTransport;

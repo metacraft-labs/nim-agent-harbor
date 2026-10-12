@@ -1,11 +1,13 @@
 import std/json
 import std/strutils
 import unittest
+import nim_everywhere
 import nim_agent_harbor
 
 suite "nim-agent-harbor":
   test "agent_harbor_client_task_request_roundtrip":
-    let client = newHarborClient("http://localhost:18080", fakeHarborTransport(), apiKeyAuth("test"))
+    let client = newHarborClient("http://localhost:18080",
+      fakeHarborTransport(apiKey = "test"), apiKeyAuth("test"))
     let response = client.createTask(CreateTaskRequest(
       tenantId: "acme",
       projectId: "storefront",
@@ -50,6 +52,18 @@ suite "nim-agent-harbor":
     let accepted = client.sendPrompt("session-1", @[harborTextBlock("continue")])
     check accepted.accepted
     check accepted.sessionId == "session-1"
+
+  test "API-key auth is sent as Authorization: ApiKey":
+    check apiKeyAuth("k").authHeaders() == @[header("Authorization", "ApiKey k")]
+    let transport = fakeHarborTransport(apiKey = "k")
+    let legacy = transport.request(newRequest(hmGet,
+      "http://localhost:18080/api/v1/sessions/session-1/report", "",
+      @[header("X-API-Key", "k")]))
+    check legacy.status == 401
+    let wrongKey = newHarborClient("http://localhost:18080", transport,
+      apiKeyAuth("other"))
+    expect HarborError:
+      discard wrongKey.sendPrompt("session-1", @[harborTextBlock("continue")])
 
   test "task request serializes workspace sandbox delivery and agent settings":
     let node = taskToJson(CreateTaskRequest(

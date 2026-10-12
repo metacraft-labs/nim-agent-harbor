@@ -2,8 +2,23 @@ import std/json
 import std/strutils
 import nim_everywhere
 
-proc fakeHarborTransport*(): HttpTransport =
+proc hasApiKey(req: HttpRequest; apiKey: string): bool =
+  for item in req.headers:
+    if item.name.cmpIgnoreCase("Authorization") == 0 and
+        item.value == "ApiKey " & apiKey:
+      return true
+
+proc fakeHarborTransport*(apiKey = ""): HttpTransport =
+  ## With `apiKey` set, the fake enforces authentication as `ah-rest-server`
+  ## does when started with an API key: a request without
+  ## `Authorization: ApiKey <apiKey>` gets 401. Other headers, `X-API-Key`
+  ## among them, are ignored.
   proc(req: HttpRequest): HttpResponse =
+    if apiKey.len > 0 and not req.hasApiKey(apiKey):
+      return HttpResponse(status: 401, body: $(%*{
+        "error": "unauthorized",
+        "message": "Missing or invalid Authorization header"
+      }))
     if req.httpMethod == hmPost and req.url.endsWith("/api/v1/tasks"):
       return HttpResponse(status: 201, body: $(%*{
         "task_id": "task-1",
