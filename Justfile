@@ -7,6 +7,7 @@ build: check-dependencies build-native build-js
 
 build-native:
     nim c {{paths}} tests/test_agent_harbor.nim
+    nim c {{paths}} tests/test_real_server_auth.nim
     nim c {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 build-js:
@@ -16,6 +17,7 @@ test: check-dependencies test-native test-js
 
 test-native:
     nim c -r {{paths}} tests/test_agent_harbor.nim
+    nim c -r {{paths}} tests/test_real_server_auth.nim
     nim c -r {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 test-js:
@@ -28,6 +30,7 @@ check-dependencies:
 
 lint-nim:
     nim check {{paths}} tests/test_agent_harbor.nim
+    nim check {{paths}} tests/test_real_server_auth.nim
     nim check {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 lint-nix:
