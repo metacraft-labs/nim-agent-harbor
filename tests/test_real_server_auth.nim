@@ -8,13 +8,14 @@
 ##
 ## - the client's `apiKeyAuth` creates a task (201);
 ## - `X-API-Key: <key>`, the header earlier client versions sent, gets 401;
-## - a request without credentials gets 401, so the server really enforces auth.
+## - a request without credentials, or with `Authorization: ApiKey` and the
+##   wrong key, gets 401, so the server really enforces auth and checks the key.
 ##
 ## When no `ah` binary is available the test is skipped with the reason
 ## printed, so hosts without Agent Harbor stay green. Native only: it spawns a
 ## process and talks plain HTTP.
 
-import std/[json, net, os, osproc, strtabs, strutils, tempfiles, times]
+import std/[json, monotimes, net, os, osproc, strtabs, strutils, tempfiles, times]
 from std/httpclient import nil
 from std/httpcore import nil
 import unittest
@@ -57,6 +58,8 @@ type RealServer = object
   root: string
   baseUrl: string
 
+proc stop(server: RealServer)
+
 proc startServer(binary: string): RealServer =
   # Unix socket paths must fit in SUN_LEN (108 bytes), so the server's state
   # lives under a short directory rather than the (often long) temp dir.
@@ -73,37 +76,48 @@ proc startServer(binary: string): RealServer =
   env["AH_API_KEY"] = apiKey
   env["AH_REST_HOST"] = "127.0.0.1"
   env["AH_REST_PORT"] = $port.int
-  # `--task-manager-sock` places the task-manager socket explicitly. Without
-  # it the server derives the path from XDG_RUNTIME_DIR and refuses any base
-  # whose ancestors are not owned by root or the current user, which is the
-  # case inside user-namespace sandboxes. `--acp-agent-cmd true` satisfies the
-  # requirement for at least one ACP agent; no agent is ever started.
-  result.process = startProcess(binary, workingDir = root,
-    args = ["server", "start",
-      "--acp-uds", root / "acp.sock",
-      "--task-manager-sock", root / "tm.sock",
-      "--acp-agent-cmd", "true"],
-    env = env,
-    options = {poParentStreams})
+  # The caller only owns the server once this returns, so a server that fails
+  # to start or come up is stopped and its directory removed here.
+  try:
+    # `--task-manager-sock` places the task-manager socket explicitly. Without
+    # it the server derives the path from XDG_RUNTIME_DIR and refuses any base
+    # whose ancestors are not owned by root or the current user, which is the
+    # case inside user-namespace sandboxes. `--acp-agent-cmd true` satisfies the
+    # requirement for at least one ACP agent; no agent is ever started.
+    result.process = startProcess(binary, workingDir = root,
+      args = ["server", "start",
+        "--acp-uds", root / "acp.sock",
+        "--task-manager-sock", root / "tm.sock",
+        "--acp-agent-cmd", "true"],
+      env = env,
+      options = {poParentStreams})
 
-  let deadline = epochTime() + 60
-  let transport = nativeTransport()
-  while true:
-    if not result.process.running:
-      raise newException(IOError, "ah server exited with " &
-        $result.process.peekExitCode & " before answering /healthz")
-    try:
-      if transport.request(newRequest(hmGet, result.baseUrl & "/healthz")).status == 200:
-        return
-    except CatchableError:
-      discard
-    if epochTime() > deadline:
-      raise newException(IOError, "ah server did not answer /healthz within 60s")
-    sleep(250)
+    # Monotonic, so a wall-clock step (NTP, suspend) cannot cut the wait short
+    # or stretch it.
+    let deadline = getMonoTime() + initDuration(seconds = 60)
+    let transport = nativeTransport()
+    while true:
+      if not result.process.running:
+        raise newException(IOError, "ah server exited with " &
+          $result.process.peekExitCode & " before answering /healthz")
+      try:
+        if transport.request(newRequest(hmGet, result.baseUrl & "/healthz")).status == 200:
+          return
+      except CatchableError:
+        discard
+      if getMonoTime() > deadline:
+        raise newException(IOError, "ah server did not answer /healthz within 60s")
+      sleep(250)
+  except CatchableError:
+    result.stop()
+    raise
 
 proc stop(server: RealServer) =
   if server.process != nil:
-    server.process.terminate()
+    # A server that already exited has been reaped, and signalling it would
+    # raise ESRCH and hide the failure that ended it.
+    if server.process.running:
+      server.process.terminate()
     if server.process.waitForExit(10_000) == -1 and server.process.running:
       server.process.kill()
       discard server.process.waitForExit()
@@ -145,13 +159,17 @@ suite "real ah-rest-server API-key authentication":
       let transport = nativeTransport()
       let tasksUrl = server.baseUrl & "/api/v1/tasks"
 
-      let anonymous = transport.request(newRequest(hmPost, tasksUrl, body,
-        @[jsonHeader]))
-      check anonymous.status == 401
+      proc checkRejected(response: HttpResponse) =
+        check response.status == 401
+        check "task_id" notin response.body
+        check "session_ids" notin response.body
 
-      let legacy = transport.request(newRequest(hmPost, tasksUrl, body,
+      checkRejected transport.request(newRequest(hmPost, tasksUrl, body,
+        @[jsonHeader]))
+      checkRejected transport.request(newRequest(hmPost, tasksUrl, body,
         @[jsonHeader, header("X-API-Key", apiKey)]))
-      check legacy.status == 401
+      checkRejected transport.request(newRequest(hmPost, tasksUrl, body,
+        @[jsonHeader, header("Authorization", "ApiKey wrong-" & apiKey)]))
 
       var statuses: seq[int] = @[]
       let recording: HttpTransport = proc(req: HttpRequest): HttpResponse =
