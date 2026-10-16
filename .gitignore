@@ -14,3 +14,6 @@ result
 
 # Generated complete native hook config; the portable config stays tracked.
 .pre-commit-config.nix.yaml
+
+# Typed build recipes emit test binaries and compiler caches here.
+/build/
