@@ -11,3 +11,6 @@ result
 
 # Repro development environment cache
 .repro/
+
+# Generated complete native hook config; the portable config stays tracked.
+.pre-commit-config.nix.yaml

@@ -1,11 +1,11 @@
 # `fetchTaskReport` requests `/api/v1/sessions/{id}/report`, which the Agent Harbor REST server does not route, and hides the failure
 
-| | |
-|---|---|
-| Status | open |
-| Recorded | 2026-10-01 |
+|             |                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status      | open                                                                                                                                       |
+| Recorded    | 2026-10-01                                                                                                                                 |
 | Observed in | nim-agent-harbor @ c1616880 (`src/nim_agent_harbor/client.nim`, `fetchTaskReport`); agent-harbor @ 2338c1ca (`agents`) for the server side |
-| Area | REST client, task/session state refresh |
+| Area        | REST client, task/session state refresh                                                                                                    |
 
 ## Observed
 
