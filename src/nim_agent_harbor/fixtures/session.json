@@ -1,0 +1,66 @@
+{
+  "id": "session-1",
+  "org_id": "00000000-0000-0000-0000-000000000000",
+  "task": {
+    "prompt": "authentication probe"
+  },
+  "agent": {
+    "agent": {
+      "software": "Acp",
+      "version": "latest"
+    },
+    "model": "mock",
+    "count": 1,
+    "acp_stdio_launch_command": {
+      "binary": "true"
+    }
+  },
+  "runtime": {
+    "type": "local",
+    "resources": {
+      "cpu": 0,
+      "memoryMiB": 0
+    }
+  },
+  "workspace": {
+    "snapshotProvider": "isolated",
+    "mountPath": "/tmp/ah-workspace"
+  },
+  "vcs": {
+    "repo_url": "file:///tmp/ah-workspace",
+    "branch": "main",
+    "commit": ""
+  },
+  "sandbox": {
+    "mode": "dynamic",
+    "debug": true,
+    "allow-network": false,
+    "containers": true,
+    "vm": true,
+    "allow-kvm": true,
+    "tmpfs-size": "6871947673",
+    "limits": {
+      "pids-max": 8192,
+      "memory-max": "13743895347"
+    },
+    "allow-escape": true
+  },
+  "status": "queued",
+  "createdAt": "2026-10-18T13:02:29.385Z",
+  "updatedAt": "2026-10-18T13:02:29.385597771Z",
+  "started_at": "2026-10-18T13:02:29.385Z",
+  "awaiting_input": false,
+  "recent_events": [
+    {
+      "type": "status",
+      "status": "queued",
+      "timestamp": 1792328549385
+    }
+  ],
+  "links": {
+    "self": "/api/v1/sessions/session-1",
+    "events": "/api/v1/sessions/session-1/events",
+    "logs": "/api/v1/sessions/session-1/logs"
+  },
+  "liveness": "dormant"
+}

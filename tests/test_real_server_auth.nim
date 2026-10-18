@@ -1,4 +1,4 @@
-## API-key authentication against a real Agent Harbor REST server.
+## Authentication and session refresh against a real Agent Harbor REST server.
 ##
 ## The fake transport in `nim_agent_harbor/fake.nim` only models the header
 ## contract; this test proves it against the server itself. It starts
@@ -10,6 +10,8 @@
 ## - `X-API-Key: <key>`, the header earlier client versions sent, gets 401;
 ## - a request without credentials, or with `Authorization: ApiKey` and the
 ##   wrong key, gets 401, so the server really enforces auth and checks the key.
+## - session refresh uses the canonical session route and nested workspace
+##   fields; the nonexistent /report route gets 404 and missing sessions raise.
 ##
 ## When no `ah` binary is available the test is skipped with the reason
 ## printed, so hosts without Agent Harbor stay green. Native only: it spawns a
@@ -141,10 +143,10 @@ proc taskRequest(repoDir: string): CreateTaskRequest =
     output: defaultOutput(),
     labels: newJObject())
 
-suite "real ah-rest-server API-key authentication":
+suite "real ah-rest-server authentication and session refresh":
   let binary = serverBinary()
 
-  test "the server accepts Authorization: ApiKey and rejects X-API-Key":
+  test "authenticated task creation and canonical session refresh":
     if binary.len == 0:
       echo "SKIPPED: no Agent Harbor server binary: `ah` is not on PATH and " &
         "AH_SERVER_BIN is unset"
@@ -180,3 +182,25 @@ suite "real ah-rest-server API-key authentication":
       check statuses == @[201]
       check created.taskId.len > 0
       check created.sessionIds.len == 1
+
+      let sessionId = created.sessionIds[0]
+      let sessionUrl = server.baseUrl & "/api/v1/sessions/" & sessionId
+      let headers = @[header("Authorization", "ApiKey " & apiKey)]
+      let details = transport.request(newRequest(hmGet, sessionUrl, "", headers))
+      check details.status == 200
+      let snapshot = parseJson(details.body)
+      let missingRoute = transport.request(newRequest(hmGet,
+        sessionUrl & "/report", "", headers))
+      check missingRoute.status == 404
+      statuses.setLen(0)
+      let report = client.fetchTaskReport(sessionId)
+      check statuses == @[200]
+      check report.sessionIds == @[sessionId]
+      check report.workspacePath == snapshot{"workspace", "mountPath"}.getStr()
+      check report.workspacePath.len > 0
+      check report.workingCopyMode == snapshot{"workspace", "snapshotProvider"}.getStr()
+      check report.workingCopyMode.len > 0
+      check report.status.len > 0
+      check report.raw{"id"}.getStr() == sessionId
+      expect HarborError:
+        discard client.fetchTaskReport("missing-session")

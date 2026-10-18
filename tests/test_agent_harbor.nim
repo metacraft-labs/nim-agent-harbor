@@ -201,12 +201,36 @@ suite "nim-agent-harbor":
       fakeHarborTransport())
     let report = client.fetchTaskReport("session-1")
 
-    check report.taskId == "task-1"
-    check report.sessionIds == @["session-1", "session-2"]
+    check report.taskId == ""
+    check report.sessionIds == @["session-1"]
     check report.workspacePath == "/tmp/ah-workspace"
-    check report.workingCopyMode == "git_worktree"
-    check report.status == "running"
-    check report.raw{"providerState", "host"}.getStr() == "executor-a"
+    check report.workingCopyMode == "isolated"
+    check report.status == "queued"
+    check report.raw{"task", "prompt"}.getStr() == "authentication probe"
+    check fakeHarborTransport().request(newRequest(hmGet,
+      "http://localhost:18080/api/v1/sessions/session-1/report")).status == 404
+
+  test "failed session refreshes expose HTTP status and response body":
+    for status in [401, 404, 503]:
+      let failureStatus = status
+      let transport: HttpTransport = proc(req: HttpRequest): HttpResponse =
+        check req.httpMethod == hmGet
+        check req.url == "http://localhost:18080/api/v1/sessions/session-1"
+        HttpResponse(status: failureStatus, body: "refresh refused")
+      let client = newHarborClient("http://localhost:18080", transport)
+      try:
+        discard client.fetchTaskReport("session-1")
+        check false
+      except HarborError as error:
+        check $status in error.msg
+        check "refresh refused" in error.msg
+
+  test "session refresh transport failures propagate":
+    let transport: HttpTransport = proc(req: HttpRequest): HttpResponse =
+      raise newException(IOError, "connection lost")
+    let client = newHarborClient("http://localhost:18080", transport)
+    expect IOError:
+      discard client.fetchTaskReport("session-1")
 
   test "SSE data lines parse as typed events":
     let events = parseSseEvents("event: message\ndata: {\"type\":\"log\",\"message\":\"Running tests\",\"ts\":\"now\"}\n\n")
