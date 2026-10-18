@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | open |
+| Status | in-progress (nixos-ci-bare-004:fix-fetch-task-report-calls-an-endpoint-the) |
 | Recorded | 2026-10-01 |
 | Observed in | nim-agent-harbor @ c1616880 (`src/nim_agent_harbor/client.nim`, `fetchTaskReport`); agent-harbor @ 2338c1ca (`agents`) for the server side |
 | Area | REST client, task/session state refresh |
