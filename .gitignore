@@ -11,3 +11,6 @@ result
 
 # Repro development environment cache
 .repro/
+
+# Typed build recipes emit test binaries and compiler caches here.
+/build/
