@@ -31,4 +31,4 @@
 # Must equal the revision repro.lock records for nim-everywhere: the engine
 # refuses a producer whose checkout differs from the consumer lock ("source
 # revision mismatch"). Move it together with the lock, never on its own.
-nim-everywhere=2a41b67a6c0d41cbb55359c702f300eb2696682f  # nim-everywhere@agents, as locked
+nim-everywhere=1ef439320e7c11cad9a11a13960e94d37afe8482  # nim-everywhere@agents, as locked
