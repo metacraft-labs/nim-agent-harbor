@@ -15,17 +15,27 @@ concurrency:
 
 jobs:
   test:
+    defaults:
+      run:
+        working-directory: nim-agent-harbor
     strategy:
       fail-fast: false
       matrix:
         runner: [[self-hosted, linux, x64], [self-hosted, linux, arm64], [self-hosted, macos, arm64]]
     runs-on: ${{ matrix.runner }}
     steps:
+      # actions/checkout refuses a `path:` outside GITHUB_WORKSPACE, so the
+      # sibling layout the Justfile expects (`../nim-everywhere`) is built
+      # inside the workspace: both repos side by side, the job running in this one.
       - uses: actions/checkout@v4
+        with:
+          path: nim-agent-harbor
       - uses: actions/checkout@v4
         with:
           repository: metacraft-labs/nim-everywhere
-          path: ../nim-everywhere
+          path: nim-everywhere
+          # The revision repro.lock records for this sibling.
+          ref: 2a41b67a6c0d41cbb55359c702f300eb2696682f
       - name: Setup Nix
         uses: metacraft-labs/devops-modules/.github/setup-nix@dev
         with:
@@ -42,19 +52,29 @@ jobs:
         if: always()
         with:
           name: test-log-${{ join(matrix.runner, '-') }}
-          path: test.log
+          path: nim-agent-harbor/test.log
   lint:
+    defaults:
+      run:
+        working-directory: nim-agent-harbor
     strategy:
       fail-fast: false
       matrix:
         runner: [[self-hosted, linux, x64], [self-hosted, linux, arm64], [self-hosted, macos, arm64]]
     runs-on: ${{ matrix.runner }}
     steps:
+      # actions/checkout refuses a `path:` outside GITHUB_WORKSPACE, so the
+      # sibling layout the Justfile expects (`../nim-everywhere`) is built
+      # inside the workspace: both repos side by side, the job running in this one.
       - uses: actions/checkout@v4
+        with:
+          path: nim-agent-harbor
       - uses: actions/checkout@v4
         with:
           repository: metacraft-labs/nim-everywhere
-          path: ../nim-everywhere
+          path: nim-everywhere
+          # The revision repro.lock records for this sibling.
+          ref: 2a41b67a6c0d41cbb55359c702f300eb2696682f
       - name: Setup Nix
         uses: metacraft-labs/devops-modules/.github/setup-nix@dev
         with:
@@ -68,7 +88,7 @@ jobs:
         if: always()
         with:
           name: lint-log-${{ join(matrix.runner, '-') }}
-          path: lint.log
+          path: nim-agent-harbor/lint.log
   nix-build:
     strategy:
       fail-fast: false
