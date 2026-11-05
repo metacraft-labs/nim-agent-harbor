@@ -53,7 +53,7 @@ proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
           # SHUT_RD / SD_RECEIVE are both zero. Do not release the descriptor.
           if shutdown(socket.getFd(), 0.cint) != 0:
             when defined(windows):
-              raiseOSError(OSErrorCode(WSAGetLastError()))
+              raiseOSError(OSErrorCode(wsaGetLastError()))
             else:
               raiseOSError(osLastError())
       proc stopReader(resp: AsyncResponse) {.async.} =
