@@ -35,7 +35,7 @@ jobs:
           repository: metacraft-labs/nim-everywhere
           path: nim-everywhere
           # The revision repro.lock records for this sibling.
-          ref: 28c03353dfeece1abb742f0809d7baea618c6248
+          ref: f2412f84512525206728de5c55dacb2b5a4d0ac4
       - name: Setup Nix
         uses: metacraft-labs/devops-modules/.github/setup-nix@dev
         with:
@@ -74,7 +74,7 @@ jobs:
           repository: metacraft-labs/nim-everywhere
           path: nim-everywhere
           # The revision repro.lock records for this sibling.
-          ref: 28c03353dfeece1abb742f0809d7baea618c6248
+          ref: f2412f84512525206728de5c55dacb2b5a4d0ac4
       - name: Setup Nix
         uses: metacraft-labs/devops-modules/.github/setup-nix@dev
         with:
