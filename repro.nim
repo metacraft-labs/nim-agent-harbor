@@ -74,11 +74,15 @@
 ## leaf recipe models the default-native pass and treats the JS/backend
 ## matrix reruns as a follow-on define/backend overlay on the same sources.)
 ##
-## **Tool provisioning.** ``defaultToolProvisioning "path"`` matches the
-## canonical recipes: the nix dev shell puts ``nim`` + ``gcc`` on ``PATH``,
-## so the weak-local PATH resolver is the right default. It is also required
-## for the ``uses:`` declarations to resolve at all ("typed tool
-## provisioning is required for uses declarations").
+## **Tool provisioning.** On Linux/macOS ``defaultToolProvisioning "path"``
+## matches the canonical recipes: the nix dev shell puts ``nim`` + ``gcc``
+## (and ``just``, ``bash``, ``node``) on ``PATH``, so the weak-local PATH
+## resolver is the right default. It is also required for the ``uses:``
+## declarations to resolve at all ("typed tool provisioning is required for
+## uses declarations"). A Windows runner has none of ``just``, ``bash`` or
+## ``node`` on ``PATH`` (``repro exec: error: Requested command not found:
+## 'just'``, job 127952343290), so Windows takes its tools from release
+## archives, as the other Windows recipes (``runquota``, the recorders) do.
 
 import repro_project_dsl
 import repro_dsl_stdlib/foreign_env
@@ -104,11 +108,16 @@ type
     source: string
     binary: string
 
-# The corpus — the single standalone ``tests/*.nim`` test file. It compiles
+# The corpus includes portable protocol assertions and a native real-TCP
+# control-deadline suite. The latter is deliberately outside the JS gate. It compiles
 # + runs to exit 0 on every host (pure ``std/json`` + ``std/strutils`` +
 # ``unittest`` + ``nim_agent_harbor``/``nim_everywhere`` — no OS gate), so
 # there is one unconditional edge and no per-OS partition.
 const portableTestSpecs: seq[AgentHarborTestSpec] = @[
+  AgentHarborTestSpec(source: "tests/test_native_stream_lifecycle.nim",
+    binary: "build/test-bin/test_native_stream_lifecycle"),
+  AgentHarborTestSpec(source: "tests/test_native_deadlines.nim",
+    binary: "build/test-bin/test_native_deadlines"),
   AgentHarborTestSpec(source: "tests/test_agent_harbor.nim",
     binary: "build/test-bin/test_agent_harbor"),
 ]
@@ -118,7 +127,7 @@ package nim_agent_harbor:
     when not defined(windows):
       useFlakeDevShell()
 
-  defaultToolProvisioning "path"
+  defaultToolProvisioning (when defined(windows): tarball else: path)
 
   uses:
     # Toolchain floor — the PATH-resolvable binaries the build needs.
@@ -127,7 +136,27 @@ package nim_agent_harbor:
     # nimble file's ``requires "nim >= 2.0.0"`` (the nix dev shell supplies
     # Nim 2.2.x).
     "nim >=2.0"
-    "gcc >=12"
+    # ``just`` runs the Justfile cross-checks (``just build`` / ``just test``)
+    # that CI re-plays inside this environment; the environment's PATH holds
+    # only declared tools, so an undeclared ``just`` is "Requested command not
+    # found: 'just'" (Windows) / "cannot execute just" (macOS).
+    "just >=1"
+    when defined(windows):
+      # ``just`` runs recipes with ``sh``; ``check-dependencies.sh`` and
+      # ``nim-js-test-gate.sh`` are bash scripts (Git for Windows' bash, whose
+      # launcher also puts grep, mktemp and tee on the script's PATH); and
+      # ``nim js -r`` (``just test-js``) executes the compiled JS under
+      # ``node``. Linux/macOS get all three from the flake dev shell.
+      "sh"
+      "bash >=4"
+      "node >=18"
+    # The C back-end `nim c` shells out to: Apple clang on macOS, gcc elsewhere.
+    # The action PATH holds only declared tools, so macOS needs clang declared
+    # (otherwise: `clang: command not found`).
+    when defined(macosx):
+      "clang >=14"
+    else:
+      "gcc >=12"
 
     # Sibling Nim-library producer (SC-11 develop-mode from-source
     # consumption). ``src/nim_agent_harbor/{client,fake}.nim`` ``import
@@ -171,8 +200,15 @@ package nim_agent_harbor:
         source = source,
         binary = binary,
         paths = @["src"],
+        defines = (if source == "tests/test_native_stream_lifecycle.nim":
+          @["futureLogging"] else: @[]),
         actionId = "nim_agent_harbor.test_build." & stem,
         extraInputs = @["src", "nim_agent_harbor.nimble"])
+      # Bind Nim's real platform C backend to the compile action.
+      when defined(macosx):
+        appendRegisteredActionToolIdentityRefs(edge.action.id, ["clang"])
+      else:
+        appendRegisteredActionToolIdentityRefs(edge.action.id, ["gcc"])
       buildActions.add(edge.action)
       # ``registerImplicitName = false`` because the BUILD edge already owns
       # the binary basename as the implicit target name; the explicit

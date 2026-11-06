@@ -6,7 +6,10 @@ paths := "--path:src --path:../nim-everywhere/src"
 build: check-dependencies build-native build-js
 
 build-native:
+    nim c --threads:on -d:futureLogging {{paths}} tests/test_native_stream_lifecycle.nim
     nim c {{paths}} tests/test_agent_harbor.nim
+    nim c {{paths}} tests/test_real_server_auth.nim
+    nim c --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 build-js:
@@ -15,7 +18,10 @@ build-js:
 test: check-dependencies test-native test-js
 
 test-native:
+    nim c -r --threads:on -d:futureLogging {{paths}} tests/test_native_stream_lifecycle.nim
     nim c -r {{paths}} tests/test_agent_harbor.nim
+    nim c -r {{paths}} tests/test_real_server_auth.nim
+    nim c -r --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c -r {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 test-js:
@@ -27,7 +33,10 @@ check-dependencies:
     bash tools/check-dependencies.sh
 
 lint-nim:
+    nim check --threads:on -d:futureLogging {{paths}} tests/test_native_stream_lifecycle.nim
     nim check {{paths}} tests/test_agent_harbor.nim
+    nim check {{paths}} tests/test_real_server_auth.nim
+    nim check --threads:on {{paths}} tests/test_native_deadlines.nim
     nim check {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 lint-nix:
@@ -44,3 +53,15 @@ format-nix:
 bump-version version:
     sed -i "s/^version       = .*/version       = \"{{version}}\"/" nim_agent_harbor.nimble
     printf "%s\n" "{{version}}" > VERSION
+
+# Entering the dev shell from another git repository must write nothing there.
+# Runs `nix develop`, so it is not part of the in-shell test recipes.
+test-dev-shell:
+    bash tests/test_dev_shell_writes_nothing_elsewhere.sh
+    bash tests/test_dev_shell_linked_worktree.sh
+
+# Compile each workflow-selected engine's real reader against the shipping lock.
+# Needs an adjacent Reprobuild Git checkout containing the selected revisions
+# (or --reprobuild <dir> with a source tree of that revision) and python3.
+test-ci-engine-lock:
+    python3 tests/test_ci_engine_reads_committed_lock.py

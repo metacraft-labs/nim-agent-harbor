@@ -51,6 +51,11 @@ jobs:
             arch: arm64
             runner: [self-hosted, windows, arm64]
     runs-on: ${{ matrix.runner }}
+    env:
+      # Reprobuild and its monitor currently target x64 on Windows, including
+      # the emulated lane on ARM64 hosts (ensure-gcc/WinLibs publish no ARM64
+      # toolchain).
+      WINDOWS_DIY_ARCH_OVERRIDE: ${{ contains(matrix.runner, 'windows') && contains(matrix.runner, 'arm64') && 'x64' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,10 +80,50 @@ jobs:
         # setup-dev-env clones the siblings listed in .github/sibling-repos
         # (codetracer-trace-format, codetracer-trace-format-nim) at the
         # workspace-lock-pinned revisions before materialising the env.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@e2b9947768dccce6de2687a495c8286df4d6de96
         with:
           env-flavor: reprobuild
+          # Reprobuild v0.2.18. Older engines fail on the committed v3 lock with
+          # "unsupported lock schema ...v3 (expected ...v2)". Keep the bootstrap
+          # libraries at that engine's own flake-lock revisions.
+          repro-from-source: true
+          repro-build-pin: 413830138a7a73293dfc551d623f7bf2cb0ab62c
+          repro-runquota-pin: 35b9dfe4af6e18f3f2a2242ece7cff330eb581e2
+          repro-io-mon-pin: 6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
+          repro-stackable-hooks-pin: 059c549306621e2f769adf75630b0b7f29018dca
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      # The from-source engine bootstrap alone takes ~50 minutes on a loaded
+      # runner, which outlives the one-hour installation token minted above
+      # (the first dev-exec then fails with HTTP 401 fetching devops-modules).
+      - name: Refresh authentication before verifying the CI engine
+        if: matrix.os == 'linux'
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Verify CI engine reads the committed lock
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          # The isolated dev environment holds only declared tools, so a bare
+          # python3 is not on its PATH ("cannot execute python3"), yet the test
+          # needs the environment's nim and gcc. Hand dev-exec an absolute
+          # interpreter: the source bootstrap exports a rooted one as
+          # REPROBUILD_BOOTSTRAP_PYTHON; a release install leaves it unset and
+          # the runner's own python3 is used.
+          python_exe="${REPROBUILD_BOOTSTRAP_PYTHON:-$(command -v python3 || true)}"
+          : "${python_exe:?no python3: neither REPROBUILD_BOOTSTRAP_PYTHON nor python3 on PATH}"
+          dev-exec "$python_exe" tests/test_ci_engine_reads_committed_lock.py --reprobuild .reprobuild-src
+
+      - name: Refresh authentication before repro build
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
 
       - name: repro build
         # Builds the conventional `build` collection declared in
@@ -87,15 +132,36 @@ jobs:
         # reprobuild engine identically to `just build`.
         run: dev-exec repro build
 
+      - name: Refresh authentication before repro test
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: repro test
         # Materialises the `test` collection.
         run: dev-exec repro test
+
+      - name: Refresh authentication before just build (cross-check)
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
 
       - name: just build (cross-check)
         # Re-runs the legacy `just build` path inside the same env so
         # we catch silent divergences between `repro build` outputs
         # and what the dev shell + Justfile produce today.
         run: dev-exec just build
+
+      - name: Refresh authentication before just test (cross-check)
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
 
       - name: just test (cross-check)
         run: dev-exec just test

@@ -77,6 +77,16 @@ type
     baseUrl*: string
     apiKey*: string
     model*: string
+  CreateSessionRequest* = object
+    prompt*: string
+    workspacePath*: string
+    agent*: AgentConfig
+    output*: OutputConfig
+    sandbox*: SandboxConfig
+    labels*: JsonNode
+  CreateSessionResponse* = object
+    sessionId*: string
+    status*: string
   CreateTaskRequest* = object
     tenantId*: string
     projectId*: string
@@ -105,6 +115,10 @@ type
     sessionId*: string
     accepted*: bool
     ts*: string
+    operationId*, deliveryState*, stopReason*: string
+    noOperation*, operationIdPresent*, operationIdNull*, deliveryStatePresent*, deliveryStateNull*: bool
+    deliveryStateType*: string
+    limitChars*, usedChars*, currentChars*, remainingChars*, overLimitBy*: int
   HarborEventKind* = enum
     hekLog = "log"
     hekThought = "thought"
@@ -302,6 +316,8 @@ proc taskToJson*(req: CreateTaskRequest): JsonNode =
     },
     "labels": req.labels
   }
+  # Optional URLs must be absent, not empty strings: Harbor parses them as URLs.
+  if req.repo.url.len == 0: result["repo"].delete("url")
   if sandbox.len > 0:
     result["sandbox"] = sandbox
   if req.workspacePath.len > 0:
@@ -317,6 +333,22 @@ proc taskToJson*(req: CreateTaskRequest): JsonNode =
       "apiKey": req.llmProvider.apiKey,
       "model": req.llmProvider.model
     }
+
+proc sessionToJson*(req: CreateSessionRequest): JsonNode =
+  ## Reuse the canonical agent/sandbox wire encoding without creating a task.
+  let common = taskToJson(CreateTaskRequest(agents: @[req.agent],
+    sandbox: req.sandbox, output: req.output))
+  result = %*{"prompt": req.prompt, "workspace_path": req.workspacePath,
+    "agent": common["agents"][0], "output": common["output"],
+    "sandbox": common{"sandbox"}}
+  if not req.labels.isNil:
+    result["labels"] = req.labels.copy()
+
+proc sessionResponseFromJson*(node: JsonNode): CreateSessionResponse =
+  result = CreateSessionResponse(sessionId: node{"session_id"}.getStr(""),
+    status: node{"status"}.getStr(""))
+  if result.sessionId.len == 0:
+    raise newException(HarborError, "Harbor session creation returned no session_id")
 
 proc taskResponseFromJson*(node: JsonNode): CreateTaskResponse =
   let responseNode =
@@ -340,10 +372,37 @@ proc taskResponseFromJson*(node: JsonNode): CreateTaskResponse =
     logs: responseNode{"links"}{"logs"}.getStr(""))
 
 proc promptAcceptedFromJson*(node: JsonNode): PromptAcceptedResponse =
-  PromptAcceptedResponse(
+  result = PromptAcceptedResponse(
     sessionId: node{"sessionId"}.getStr(""),
     accepted: node{"accepted"}.getBool(false),
-    ts: node{"ts"}.getStr(""))
+    ts: node{"ts"}.getStr(""),
+    operationId: node{"operationId"}.getStr(""),
+    operationIdPresent: node.kind == JObject and node.hasKey("operationId"),
+    operationIdNull: node{"operationId"} != nil and node["operationId"].kind == JNull,
+    deliveryState: node{"deliveryState"}.getStr(""),
+    deliveryStatePresent: node.kind == JObject and node.hasKey("deliveryState"),
+    deliveryStateNull: node{"deliveryState"} != nil and node["deliveryState"].kind == JNull,
+    deliveryStateType: (if node{"deliveryState"} == nil: "absent" else: $node["deliveryState"].kind),
+    stopReason: node{"stopReason"}.getStr(""),
+    limitChars: node{"limitChars"}.getInt(-1),
+    usedChars: node{"usedChars"}.getInt(-1),
+    currentChars: node{"currentChars"}.getInt(-1),
+    remainingChars: node{"remainingChars"}.getInt(-1),
+    overLimitBy: node{"overLimitBy"}.getInt(-1))
+  # The public REST serializer omits operationId when no operation exists.
+  # Absence alone is not an admission boundary: require a complete, internally
+  # consistent quota rejection and no delivery identity/state. Explicit empty
+  # strings remain uncertain, rather than being treated as null.
+  let noIdentity = not result.operationIdPresent or node["operationId"].kind == JNull
+  let quotaValid = result.limitChars > 0 and result.currentChars >= 0 and
+    result.remainingChars >= 0 and result.usedChars > result.limitChars and
+    result.overLimitBy == result.usedChars - result.limitChars and
+    result.usedChars >= result.currentChars and
+    (result.remainingChars == max(0, result.limitChars - result.currentChars) or
+      (result.currentChars == 0 and result.remainingChars == 0))
+  result.noOperation = node{"accepted"} != nil and node["accepted"].kind == JBool and
+    not result.accepted and result.sessionId.len > 0 and result.stopReason == "context_limit" and
+    noIdentity and (not result.deliveryStatePresent or node["deliveryState"].kind == JNull) and quotaValid
 
 proc eventFromJson*(node: JsonNode): HarborEvent =
   let kind = node{"type"}.getStr("unknown")

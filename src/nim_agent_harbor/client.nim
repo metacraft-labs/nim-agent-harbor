@@ -4,15 +4,18 @@ import nim_everywhere
 import nim_agent_harbor/types
 
 type
+  HarborStreamCallback* = proc(event: HarborEvent; cursor: string): bool {.closure.}
+  HarborStreamTransport* = proc(request: HttpRequest; onEvent: HarborStreamCallback) {.closure.}
   HarborClient* = object
     baseUrl*: string
     auth*: HarborAuth
     transport*: HttpTransport
+    streamTransport*: HarborStreamTransport
 
 proc authHeaders*(auth: HarborAuth): seq[HttpHeader] =
   case auth.kind
   of akNone: @[]
-  of akApiKey: @[header("X-API-Key", auth.token)]
+  of akApiKey: @[header("Authorization", "ApiKey " & auth.token)]
   of akBearer: @[header("Authorization", "Bearer " & auth.token)]
 
 proc newHarborClient*(baseUrl: string; transport: HttpTransport;
@@ -52,12 +55,13 @@ proc historyPath(sessionId: string; query: EventHistoryQuery): string =
 
 type
   HarborTaskReport* = object
-    ## Snapshot of a Harbor task's server-side state used by the
+    ## Snapshot of a Harbor session's server-side state used by the
     ## codetracer ViewModel to refresh per-session entries after the
     ## workspace provisioning step lands or the agent's lifecycle
-    ## transitions. ``raw`` is the unparsed JSON body so callers can
+    ## transitions. ``raw`` is the complete parsed JSON body so callers can
     ## reach into provider-specific fields without forcing the
-    ## structured surface to grow ahead of upstream.
+    ## structured surface to grow ahead of upstream. The session endpoint
+    ## does not provide ``taskId``; ``sessionIds`` contains the requested ID.
     taskId*: string
     sessionIds*: seq[string]
     workspacePath*: string
@@ -66,36 +70,25 @@ type
     raw*: JsonNode
 
 proc fetchTaskReport*(client: HarborClient; sessionId: string): HarborTaskReport =
-  ## Pull the latest server-side state for ``sessionId``. Returns a
-  ## minimally-populated report (only ``sessionId``-derived fields) on
-  ## error so callers don't have to special-case missing data.
+  ## Pull the canonical session snapshot, preserving its JSON in ``raw``.
+  ## A session snapshot does not enumerate sibling sessions or identify its
+  ## orchestration task. Non-2xx responses raise ``HarborError`` so a failed
+  ## refresh cannot replace the caller's last known state with empty values.
   result.sessionIds = @[sessionId]
   let response = client.transport.request(newRequest(
     hmGet,
-    client.baseUrl & "/api/v1/sessions/" & sessionId & "/report",
+    client.baseUrl & "/api/v1/sessions/" & sessionId,
     "",
     @[header("Accept", "application/json")] & client.auth.authHeaders()))
   if response.status < 200 or response.status >= 300:
-    return
+    raise newException(HarborError,
+      "Harbor session refresh failed (HTTP " & $response.status & "): " & response.body)
   let parsed = parseJson(response.body)
   result.raw = parsed
-  result.taskId = parsed{"taskId"}.getStr(
-    parsed{"task_id"}.getStr(""))
-  let sessionIds =
-    if parsed.hasKey("sessionIds"): parsed{"sessionIds"}
-    else: parsed{"session_ids"}
-  if not sessionIds.isNil and sessionIds.kind == JArray:
-    result.sessionIds.setLen(0)
-    for item in sessionIds:
-      let id = item.getStr("")
-      if id.len > 0:
-        result.sessionIds.add id
-  if result.sessionIds.len == 0:
-    result.sessionIds = @[sessionId]
-  result.workspacePath = parsed{"workspacePath"}.getStr(
-    parsed{"workspace_path"}.getStr(""))
-  result.workingCopyMode = parsed{"workingCopyMode"}.getStr(
-    parsed{"working_copy_mode"}.getStr(""))
+  result.workspacePath = parsed{"workspace", "mountPath"}.getStr("")
+  # The server stores the requested working-copy mode as snapshotProvider,
+  # and exposes that same value as working_copy_mode on /sessions/{id}/info.
+  result.workingCopyMode = parsed{"workspace", "snapshotProvider"}.getStr("")
   result.status = parsed{"status"}.getStr("")
 
 proc createTask*(client: HarborClient; req: CreateTaskRequest): CreateTaskResponse =
@@ -108,15 +101,28 @@ proc createTask*(client: HarborClient; req: CreateTaskRequest): CreateTaskRespon
     raise newException(HarborError, response.body)
   taskResponseFromJson(parseJson(response.body))
 
+proc createSession*(client: HarborClient; req: CreateSessionRequest): CreateSessionResponse =
+  ## Create a standalone session with its first user prompt, not an orchestration task.
+  if req.prompt.strip().len == 0:
+    raise newException(HarborError, "Harbor session creation requires an initial prompt")
+  let response = client.transport.request(newRequest(
+    hmPost, client.baseUrl & "/api/v1/sessions", $sessionToJson(req),
+    @[header("Content-Type", "application/json; charset=utf-8")] & client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, response.body)
+  sessionResponseFromJson(parseJson(response.body))
+
 proc sendPrompt*(client: HarborClient; sessionId: string;
     prompt: seq[HarborContentBlock]): PromptAcceptedResponse =
-  var blocks = newJArray()
+  var text: seq[string] = @[]
   for item in prompt:
-    blocks.add contentBlockToJson(item)
+    if item.kind != hcbText:
+      raise newException(HarborError, "Harbor REST prompts currently accept text only")
+    text.add item.text
   let response = client.transport.request(newRequest(
     hmPost,
     client.baseUrl & "/api/v1/sessions/" & sessionId & "/prompt",
-    $(%*{"prompt": blocks}),
+    $(%*{"prompt": text.join("\n")}),
     @[header("Content-Type", "application/json; charset=utf-8")] & client.auth.authHeaders()))
   if response.status < 200 or response.status >= 300:
     raise newException(HarborError, response.body)
@@ -177,3 +183,23 @@ proc parseSseEvents*(sseText: string): seq[HarborEvent] =
       dataLines.add line[5 .. ^1].strip()
   flush()
   events
+
+proc streamSessionEvents*(client: HarborClient; sessionId: string;
+    onEvent: HarborStreamCallback; after = "") =
+  ## Follow the durable event stream, stopping when the consumer returns false.
+  ## A cursor belongs to one session and is supplied again on the next turn.
+  if client.streamTransport == nil:
+    for event in client.readSessionEvents(sessionId):
+      if not onEvent(event, ""): break
+    return
+  var headers = @[header("Accept", "text/event-stream")] & client.auth.authHeaders()
+  if after.len > 0: headers.add header("Last-Event-ID", after)
+  client.streamTransport(newRequest(hmGet,
+    client.baseUrl & "/api/v1/sessions/" & sessionId & "/events", "", headers), onEvent)
+
+proc stopSession*(client: HarborClient; sessionId: string) =
+  let response = client.transport.request(newRequest(hmPost,
+    client.baseUrl & "/api/v1/sessions/" & sessionId & "/stop", "{}",
+    @[header("Content-Type", "application/json")] & client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, response.body)

@@ -2,8 +2,27 @@ import std/json
 import std/strutils
 import nim_everywhere
 
-proc fakeHarborTransport*(): HttpTransport =
+# Captured from a real ah server; see tests/fixtures/README.md. This fixture
+# keeps the fake on the server's actual session route and nested wire shape.
+const sessionSnapshot = staticRead("fixtures/session.json")
+
+proc hasApiKey(req: HttpRequest; apiKey: string): bool =
+  for item in req.headers:
+    if item.name.cmpIgnoreCase("Authorization") == 0 and
+        item.value == "ApiKey " & apiKey:
+      return true
+
+proc fakeHarborTransport*(apiKey = ""): HttpTransport =
+  ## With `apiKey` set, the fake enforces authentication as `ah-rest-server`
+  ## does when started with an API key: a request without
+  ## `Authorization: ApiKey <apiKey>` gets 401. Other headers, `X-API-Key`
+  ## among them, are ignored.
   proc(req: HttpRequest): HttpResponse =
+    if apiKey.len > 0 and not req.hasApiKey(apiKey):
+      return HttpResponse(status: 401, body: $(%*{
+        "error": "unauthorized",
+        "message": "Missing or invalid Authorization header"
+      }))
     if req.httpMethod == hmPost and req.url.endsWith("/api/v1/tasks"):
       return HttpResponse(status: 201, body: $(%*{
         "task_id": "task-1",
@@ -32,15 +51,8 @@ proc fakeHarborTransport*(): HttpTransport =
         "total_count": 2
       }))
     if req.httpMethod == hmGet and
-        req.url.endsWith("/api/v1/sessions/session-1/report"):
-      return HttpResponse(status: 200, body: $(%*{
-        "taskId": "task-1",
-        "sessionIds": ["session-1", "session-2"],
-        "workspacePath": "/tmp/ah-workspace",
-        "workingCopyMode": "git_worktree",
-        "status": "running",
-        "providerState": {"host": "executor-a"}
-      }))
+        req.url.endsWith("/api/v1/sessions/session-1"):
+      return HttpResponse(status: 200, body: sessionSnapshot)
     if req.httpMethod == hmGet and req.url.contains("/api/v1/sessions/session-1/events"):
       return HttpResponse(status: 200, body:
         "event: message\n" &

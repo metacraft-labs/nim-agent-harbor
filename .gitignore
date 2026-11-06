@@ -1,13 +1,17 @@
 .direnv/
-.pre-commit-config.yaml
 nimcache/
 # Per-checkout nimcache (config.nims): every Nim compile in this checkout
 # keeps its intermediate files here, never in the shared ~/.cache/nim.
 .nimcache/
 tests/test_*
 !tests/*.nim
+!tests/*.sh
+!tests/*.py
 *.js
 result
 
 # Repro development environment cache
 .repro/
+
+# Typed build recipes emit test binaries and compiler caches here.
+/build/
