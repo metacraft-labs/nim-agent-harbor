@@ -51,6 +51,11 @@ jobs:
             arch: arm64
             runner: [self-hosted, windows, arm64]
     runs-on: ${{ matrix.runner }}
+    env:
+      # Reprobuild and its monitor currently target x64 on Windows, including
+      # the emulated lane on ARM64 hosts (ensure-gcc/WinLibs publish no ARM64
+      # toolchain).
+      WINDOWS_DIY_ARCH_OVERRIDE: ${{ contains(matrix.runner, 'windows') && contains(matrix.runner, 'arm64') && 'x64' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -87,6 +92,17 @@ jobs:
           repro-io-mon-pin: 6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
           repro-stackable-hooks-pin: 059c549306621e2f769adf75630b0b7f29018dca
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      # The from-source engine bootstrap alone takes ~50 minutes on a loaded
+      # runner, which outlives the one-hour installation token minted above
+      # (the first dev-exec then fails with HTTP 401 fetching devops-modules).
+      - name: Refresh authentication before verifying the CI engine
+        if: matrix.os == 'linux'
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
 
       - name: Verify CI engine reads the committed lock
         if: matrix.os == 'linux'

@@ -132,7 +132,13 @@ package nim_agent_harbor:
     # nimble file's ``requires "nim >= 2.0.0"`` (the nix dev shell supplies
     # Nim 2.2.x).
     "nim >=2.0"
-    "gcc >=12"
+    # The C back-end `nim c` shells out to: Apple clang on macOS, gcc elsewhere.
+    # The action PATH holds only declared tools, so macOS needs clang declared
+    # (otherwise: `clang: command not found`).
+    when defined(macosx):
+      "clang >=14"
+    else:
+      "gcc >=12"
 
     # Sibling Nim-library producer (SC-11 develop-mode from-source
     # consumption). ``src/nim_agent_harbor/{client,fake}.nim`` ``import
@@ -180,6 +186,11 @@ package nim_agent_harbor:
           @["futureLogging"] else: @[]),
         actionId = "nim_agent_harbor.test_build." & stem,
         extraInputs = @["src", "nim_agent_harbor.nimble"])
+      # Bind Nim's real platform C backend to the compile action.
+      when defined(macosx):
+        appendRegisteredActionToolIdentityRefs(edge.action.id, ["clang"])
+      else:
+        appendRegisteredActionToolIdentityRefs(edge.action.id, ["gcc"])
       buildActions.add(edge.action)
       # ``registerImplicitName = false`` because the BUILD edge already owns
       # the binary basename as the implicit target name; the explicit
