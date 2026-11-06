@@ -41,6 +41,21 @@ proc nativeHarborTransport*(timeoutMs = 30_000): HttpTransport =
       return await pending
     waitFor control()
 
+when defined(windows):
+  const errorOperationAborted = 995 # ERROR_OPERATION_ABORTED
+  const errorNotFound = 1168 # ERROR_NOT_FOUND
+
+  proc cancelIoEx(file: Handle; overlapped: pointer): WINBOOL
+    {.stdcall, dynlib: "kernel32", importc: "CancelIoEx".}
+
+  proc isLocalCancel(error: ref OSError): bool =
+    ## True for the failure a pending overlapped receive reports once
+    ## `shutdownReceive` cancelled it: the Windows counterpart of the
+    ## EOF a shut-down receive side yields on POSIX.
+    int(error.errorCode) == errorOperationAborted
+else:
+  proc isLocalCancel(error: ref OSError): bool = false
+
 proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
   result = proc(req: nim_everywhere.HttpRequest; onEvent: HarborStreamCallback) =
     proc consume() {.async.} =
@@ -50,6 +65,17 @@ proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
       proc shutdownReceive() =
         let socket = http.getSocket()
         if socket != nil and not socket.isClosed():
+          when defined(windows):
+            # shutdown(SD_RECEIVE) does not complete an overlapped WSARecv that
+            # asyncdispatch (IOCP) already posted, so the reader would stay
+            # pending for as long as the peer keeps the connection open.
+            # Cancel the pending I/O instead: it completes with
+            # ERROR_OPERATION_ABORTED while the handle stays open, which keeps
+            # the settle-before-close protocol below intact. Nothing pending
+            # (ERROR_NOT_FOUND) is fine.
+            if cancelIoEx(Handle(socket.getFd()), nil) == 0:
+              let cancelError = int(osLastError())
+              if cancelError != errorNotFound: raiseOSError(OSErrorCode(cancelError))
           # SHUT_RD / SD_RECEIVE are both zero. Do not release the descriptor.
           if shutdown(socket.getFd(), 0.cint) != 0:
             # A peer that has already closed leaves nothing to receive, so
@@ -106,6 +132,10 @@ proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
               if not localEof:
                 raise
               return
+            except OSError as error:
+              # Windows: the receive we cancelled in shutdownReceive.
+              if not isLocalCancel(error): raise
+              return
         let settled = drain()
         if not (await asyncdispatch.withTimeout(settled, 1000)):
           raise newException(HarborError, "Harbor event stream reader did not stop")
@@ -122,6 +152,9 @@ proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
           if error.msg.split("\nAsync traceback:\n", 1)[0] !=
               "Connection was closed before full request has been made":
             raise
+        except OSError as error:
+          # Windows: the headers receive cancelled by shutdownReceive.
+          if not isLocalCancel(error): raise
         raise newException(HarborError, "Harbor event stream connection timed out")
       let resp = await request
       var pending = ""
