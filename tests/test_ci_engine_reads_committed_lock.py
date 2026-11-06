@@ -57,7 +57,21 @@ def extract_engine_sources(source, revision, work):
         archive = subprocess.check_output(['git', '-C', str(source), 'archive',
                                             revision, 'libs', 'flake.lock'])
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-            tar.extractall(work, filter='data')
+            # `filter=` exists only on Python 3.12+ and the security backports
+            # (3.11.4+); the Linux runner's interpreter predates them. The
+            # archive is read from a revision-pinned object database, but the
+            # fallback still refuses any member that is not a plain file or
+            # directory inside WORK.
+            if hasattr(tarfile, 'data_filter'):
+                tar.extractall(work, filter='data')
+            else:
+                root = work.resolve()
+                for member in tar.getmembers():
+                    target = (root / member.name).resolve()
+                    if not (member.isfile() or member.isdir()) or \
+                            root not in (target, *target.parents):
+                        raise SystemExit('unsafe member in engine archive: ' + member.name)
+                tar.extractall(work)
         return
     shutil.copytree(source / 'libs', work / 'libs')
     shutil.copy(source / 'flake.lock', work / 'flake.lock')
