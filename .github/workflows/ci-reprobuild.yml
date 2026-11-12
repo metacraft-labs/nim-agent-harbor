@@ -92,6 +92,8 @@ jobs:
           repro-io-mon-pin: 7a9b2f331024f4bc0b952bcab89b1dc48525d804
           repro-stackable-hooks-pin: c1d55ce33fb2a29e4cf8d8bdbe1713f355370d0a
           gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # The from-source engine bootstrap alone takes ~50 minutes on a loaded
       # runner, which outlives the one-hour installation token minted above
