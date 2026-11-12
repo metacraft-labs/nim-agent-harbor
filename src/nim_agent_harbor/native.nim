@@ -78,18 +78,21 @@ proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
               if cancelError != errorNotFound: raiseOSError(OSErrorCode(cancelError))
           # SHUT_RD / SD_RECEIVE are both zero. Do not release the descriptor.
           if shutdown(socket.getFd(), 0.cint) != 0:
+            # A peer that has already closed leaves nothing to receive, so
+            # the receive side is down already. Linux returns 0 here; macOS
+            # and the BSDs report ENOTCONN, and Winsock reports WSAENOTCONN
+            # (10057). See shutdown(2) on macOS / FreeBSD, and
+            # https://learn.microsoft.com/windows/win32/api/winsock/nf-winsock-shutdown.
+            # Any other error is real and is raised.
             when defined(windows):
-              # WSAENOTCONN (10057): the peer already closed the connection.
-              let code = OSErrorCode(wsaGetLastError())
-              if int(code) == 10057: return
+              const WsaENotConn = 10057
+              let err = wsaGetLastError()
+              if err != WsaENotConn:
+                raiseOSError(OSErrorCode(err))
             else:
-              # macOS (unlike Linux) reports ENOTCONN when shutting down the
-              # receive side of a socket whose peer has already closed it.
-              # Nothing is left to shut down: the reader sees EOF on its own,
-              # so the settle-before-close protocol below still holds.
-              let code = osLastError()
-              if int(code) == int(ENOTCONN): return
-            raiseOSError(code)
+              let err = osLastError()
+              if int(err) != int(ENOTCONN):
+                raiseOSError(err)
       proc stopReader(resp: AsyncResponse) {.async.} =
         # Settle the owned background parser before releasing its descriptor.
         shutdownReceive()
