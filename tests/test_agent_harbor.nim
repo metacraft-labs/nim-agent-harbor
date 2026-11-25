@@ -243,3 +243,53 @@ suite "nim-agent-harbor":
     check item.kind == hcbResource
     check item.uri == "file:///tmp/repo"
     check contentBlockToJson(harborTextBlock("owned"))["text"].getStr() == "owned"
+
+  # Under the JS target `int` is 32 bits, and std/json's `getInt` raises a
+  # RangeDefect on a wire integer past 2^31-1. Each reader holds such a value
+  # to the 32-bit range on every target, so native and JS builds agree.
+  test "event line counts past the int range read as the 32-bit bounds":
+    for (wire, expected) in [("10000000000", int(high(int32))),
+                             ("-10000000000", int(low(int32)))]:
+      let event = eventFromJson(parseJson("{\"type\": \"file_edit\", " &
+        "\"lines_added\": " & wire & ", \"lines_removed\": " & wire & "}"))
+      check event.kind == hekFileEdit
+      check event.linesAdded == expected
+      check event.linesRemoved == expected
+
+  test "event history counts past the int range read as the 32-bit bounds":
+    for (wire, expected) in [("10000000000", int(high(int32))),
+                             ("-10000000000", int(low(int32)))]:
+      for key in ["total_count", "totalCount"]:
+        let history = eventHistoryFromJson(parseJson("{\"events\": [], \"" &
+          key & "\": " & wire & "}"))
+        check history.totalCount == expected
+
+  test "context-limit fields past the int range read as the 32-bit bounds":
+    for (wire, expected) in [("10000000000", int(high(int32))),
+                             ("-10000000000", int(low(int32)))]:
+      let response = promptAcceptedFromJson(parseJson("{\"accepted\": false, " &
+        "\"limitChars\": " & wire & ", \"usedChars\": " & wire &
+        ", \"currentChars\": " & wire & ", \"remainingChars\": " & wire &
+        ", \"overLimitBy\": " & wire & "}"))
+      check response.limitChars == expected
+      check response.usedChars == expected
+      check response.currentChars == expected
+      check response.remainingChars == expected
+      check response.overLimitBy == expected
+
+  test "a quota rejection is judged on the wire values, not the clamped ones":
+    # Clamped, usedChars (2147483647) - limitChars (2147483637) == overLimitBy
+    # (10) would look consistent; on the wire values it is not.
+    let inconsistent = promptAcceptedFromJson(parseJson("""{"sessionId": "live",
+      "accepted": false, "stopReason": "context_limit", "limitChars": 2147483637,
+      "currentChars": 0, "remainingChars": 0, "usedChars": 10000000000,
+      "overLimitBy": 10}"""))
+    check not inconsistent.noOperation
+    check inconsistent.usedChars == int(high(int32))
+    # A consistent rejection past the int range is a rejection on every target.
+    let consistent = promptAcceptedFromJson(parseJson("""{"sessionId": "live",
+      "accepted": false, "stopReason": "context_limit", "limitChars": 10000000000,
+      "currentChars": 10000000000, "remainingChars": 0, "usedChars": 10000000004,
+      "overLimitBy": 4}"""))
+    check consistent.noOperation
+    check consistent.overLimitBy == 4

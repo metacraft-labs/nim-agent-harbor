@@ -371,6 +371,22 @@ proc taskResponseFromJson*(node: JsonNode): CreateTaskResponse =
     events: responseNode{"links"}{"events"}.getStr(""),
     logs: responseNode{"links"}{"logs"}.getStr(""))
 
+proc toWireInt(n: int64): int =
+  ## `n` held to the 32-bit range: `int` is 32 bits under JS (`high(int)` is
+  ## 2^31-1 there), and converting a wider value to it raises a RangeDefect.
+  int(clamp(n, int64(low(int32)), int64(high(int32))))
+
+proc wireInt(node: JsonNode; default = 0): int =
+  ## A JSON integer read into an `int`, held to the 32-bit range that `int`
+  ## holds on every target, or `default` when `node` is nil or not an integer.
+  ## It is std/json's `getInt` without its RangeDefect: under JS `getInt`
+  ## raises on an integer past 2^31-1, such as a wire value of `10000000000`,
+  ## which aborted the whole read. Wire readers use it, never `getInt`.
+  ## Private on purpose: nim-agents imports this module beside its own
+  ## exported `wireInt`, and two exported ones would make its calls ambiguous.
+  if node.isNil or node.kind != JInt: default
+  else: toWireInt(node.getBiggestInt)
+
 proc promptAcceptedFromJson*(node: JsonNode): PromptAcceptedResponse =
   result = PromptAcceptedResponse(
     sessionId: node{"sessionId"}.getStr(""),
@@ -384,22 +400,36 @@ proc promptAcceptedFromJson*(node: JsonNode): PromptAcceptedResponse =
     deliveryStateNull: node{"deliveryState"} != nil and node["deliveryState"].kind == JNull,
     deliveryStateType: (if node{"deliveryState"} == nil: "absent" else: $node["deliveryState"].kind),
     stopReason: node{"stopReason"}.getStr(""),
-    limitChars: node{"limitChars"}.getInt(-1),
-    usedChars: node{"usedChars"}.getInt(-1),
-    currentChars: node{"currentChars"}.getInt(-1),
-    remainingChars: node{"remainingChars"}.getInt(-1),
-    overLimitBy: node{"overLimitBy"}.getInt(-1))
+    limitChars: node{"limitChars"}.wireInt(-1),
+    usedChars: node{"usedChars"}.wireInt(-1),
+    currentChars: node{"currentChars"}.wireInt(-1),
+    remainingChars: node{"remainingChars"}.wireInt(-1),
+    overLimitBy: node{"overLimitBy"}.wireInt(-1))
   # The public REST serializer omits operationId when no operation exists.
   # Absence alone is not an admission boundary: require a complete, internally
   # consistent quota rejection and no delivery identity/state. Explicit empty
   # strings remain uncertain, rather than being treated as null.
   let noIdentity = not result.operationIdPresent or node["operationId"].kind == JNull
-  let quotaValid = result.limitChars > 0 and result.currentChars >= 0 and
-    result.remainingChars >= 0 and result.usedChars > result.limitChars and
-    result.overLimitBy == result.usedChars - result.limitChars and
-    result.usedChars >= result.currentChars and
-    (result.remainingChars == max(0, result.limitChars - result.currentChars) or
-      (result.currentChars == 0 and result.remainingChars == 0))
+  # The quota is judged on the wire values, not on the fields above: those are
+  # held to the 32-bit range, and clamping can make an inconsistent quota look
+  # consistent (usedChars 10000000000 reads as 2147483647, which is
+  # limitChars 2147483637 plus overLimitBy 10). `getBiggestInt` is 64-bit on
+  # every target, so the judgement is the same on native and JS builds.
+  let
+    limitChars = node{"limitChars"}.getBiggestInt(-1).int64
+    usedChars = node{"usedChars"}.getBiggestInt(-1).int64
+    currentChars = node{"currentChars"}.getBiggestInt(-1).int64
+    remainingChars = node{"remainingChars"}.getBiggestInt(-1).int64
+    overLimitBy = node{"overLimitBy"}.getBiggestInt(-1).int64
+  # Each subtraction runs only after its operands' signs are tested
+  # (limitChars > 0, usedChars > limitChars, currentChars >= 0), so neither
+  # can overflow int64.
+  let quotaValid = limitChars > 0 and currentChars >= 0 and
+    remainingChars >= 0 and usedChars > limitChars and
+    overLimitBy == usedChars - limitChars and
+    usedChars >= currentChars and
+    (remainingChars == max(0'i64, limitChars - currentChars) or
+      (currentChars == 0 and remainingChars == 0))
   result.noOperation = node{"accepted"} != nil and node["accepted"].kind == JBool and
     not result.accepted and result.sessionId.len > 0 and result.stopReason == "context_limit" and
     noIdentity and (not result.deliveryStatePresent or node["deliveryState"].kind == JNull) and quotaValid
@@ -425,8 +455,8 @@ proc eventFromJson*(node: JsonNode): HarborEvent =
   result.toolName = node{"tool_name"}.getStr("")
   result.toolExecutionId = node{"tool_execution_id"}.getStr("")
   result.filePath = node{"file_path"}.getStr(node{"path"}.getStr(""))
-  result.linesAdded = node{"lines_added"}.getInt(0)
-  result.linesRemoved = node{"lines_removed"}.getInt(0)
+  result.linesAdded = node{"lines_added"}.wireInt(0)
+  result.linesRemoved = node{"lines_removed"}.wireInt(0)
   result.mountPath = node{"mountPath"}.getStr(node{"mount_path"}.getStr(
     node{"workspace_path"}.getStr(""))
   )
@@ -458,5 +488,5 @@ proc eventHistoryFromJson*(node: JsonNode): EventHistoryResponse =
     historyNode{"hasMore"}.getBool(false))
   result.oldestTimestamp = historyNode{"oldest_timestamp"}.getBiggestInt(
     historyNode{"oldestTimestamp"}.getBiggestInt(0))
-  result.totalCount = historyNode{"total_count"}.getInt(
-    historyNode{"totalCount"}.getInt(result.events.len))
+  result.totalCount = historyNode{"total_count"}.wireInt(
+    historyNode{"totalCount"}.wireInt(result.events.len))
