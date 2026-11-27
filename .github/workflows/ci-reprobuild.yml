@@ -80,36 +80,66 @@ jobs:
         # setup-dev-env clones the siblings listed in .github/sibling-repos
         # (codetracer-trace-format, codetracer-trace-format-nim) at the
         # workspace-lock-pinned revisions before materialising the env.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@8ee1026a5d427a7aa5cf8c036fab12cb3d009503
+        id: dev-env
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: reprobuild
-          # Reprobuild v0.2.23. Older engines fail on the committed v3 lock with
-          # "unsupported lock schema ...v3 (expected ...v2)". Keep the bootstrap
-          # libraries at that engine's own flake-lock revisions.
-          repro-from-source: true
-          repro-build-pin: 9dbf4e710d7cc0b9a79a4bcd54c931afb6849dd0
-          repro-runquota-pin: 9818dc0c90be8ba7993424a7bbfbb6e009ffa965
-          repro-io-mon-pin: 7a9b2f331024f4bc0b952bcab89b1dc48525d804
-          repro-stackable-hooks-pin: c1d55ce33fb2a29e4cf8d8bdbe1713f355370d0a
+          # The Reprobuild engine is the fleet pin, the action's default:
+          # `pins/reprobuild.json` in metacraft-labs/metacraft-github-actions,
+          # built against the bootstrap libraries that pinned revision locks.
+          # tests/test_ci_engine_reads_committed_lock.py refuses an override.
           gh-token: ${{ steps.ci_token.outputs.token }}
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Assert the pinned engine
+        # setup-dev-env reports the engine it installed. It is the pin, not an
+        # override, and a source build is a clean checkout of that commit. A
+        # Linux binary-cache hit installs the pinned commit's Nix package and
+        # Windows may install its pin prerelease; neither has a checkout.
+        shell: bash
+        env:
+          REPRO_COMMIT: ${{ steps.dev-env.outputs.repro-commit }}
+          REPRO_ORIGIN: ${{ steps.dev-env.outputs.repro-origin }}
+          REPRO_INSTALL_SOURCE: ${{ steps.dev-env.outputs.repro-install-source }}
+        run: |
+          set -euo pipefail
+          echo "repro ${REPRO_COMMIT} (origin ${REPRO_ORIGIN}, ${REPRO_INSTALL_SOURCE})"
+          [[ "${REPRO_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          test "${REPRO_ORIGIN}" = pin
+          if [ "${REPRO_INSTALL_SOURCE}" = source ] && [ "${RUNNER_OS}" != Windows ]; then
+            test "$(git -C .reprobuild-src rev-parse HEAD)" = "${REPRO_COMMIT}"
+            test -z "$(git -C .reprobuild-src status --porcelain)"
+          fi
 
       # The from-source engine bootstrap alone takes ~50 minutes on a loaded
       # runner, which outlives the one-hour installation token minted above
       # (the first dev-exec then fails with HTTP 401 fetching devops-modules).
       - name: Refresh authentication before verifying the CI engine
         if: matrix.os == 'linux'
-        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Verify CI engine reads the committed lock
+        # The reader is compiled from the engine's own source revision. A
+        # source build left it in .reprobuild-src; a binary-cache install did
+        # not, so fetch that one commit.
         if: matrix.os == 'linux'
         shell: bash
+        env:
+          REPRO_COMMIT: ${{ steps.dev-env.outputs.repro-commit }}
+          REPRO_INSTALL_SOURCE: ${{ steps.dev-env.outputs.repro-install-source }}
         run: |
+          set -euo pipefail
+          source_root=.reprobuild-src
+          if [ "${REPRO_INSTALL_SOURCE}" != source ]; then
+            source_root="${RUNNER_TEMP}/reprobuild-engine-source"
+            git init -q "$source_root"
+            git -C "$source_root" fetch -q --depth 1 https://github.com/metacraft-labs/reprobuild.git "${REPRO_COMMIT}"
+          fi
           # The isolated dev environment holds only declared tools, so a bare
           # python3 is not on its PATH ("cannot execute python3"), yet the test
           # needs the environment's nim and gcc. Hand dev-exec an absolute
@@ -118,10 +148,10 @@ jobs:
           # the runner's own python3 is used.
           python_exe="${REPROBUILD_BOOTSTRAP_PYTHON:-$(command -v python3 || true)}"
           : "${python_exe:?no python3: neither REPROBUILD_BOOTSTRAP_PYTHON nor python3 on PATH}"
-          dev-exec "$python_exe" tests/test_ci_engine_reads_committed_lock.py --reprobuild .reprobuild-src
+          dev-exec "$python_exe" tests/test_ci_engine_reads_committed_lock.py --reprobuild "$source_root" --revision "${REPRO_COMMIT}"
 
       - name: Refresh authentication before repro build
-        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -135,7 +165,7 @@ jobs:
         run: dev-exec repro build
 
       - name: Refresh authentication before repro test
-        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -146,7 +176,7 @@ jobs:
         run: dev-exec repro test
 
       - name: Refresh authentication before just build (cross-check)
-        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -159,7 +189,7 @@ jobs:
         run: dev-exec just build
 
       - name: Refresh authentication before just test (cross-check)
-        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@bcd29c631ff01fbd0e577c5f96e5f9d5211fed26
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}

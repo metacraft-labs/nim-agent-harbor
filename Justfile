@@ -60,8 +60,9 @@ test-dev-shell:
     bash tests/test_dev_shell_writes_nothing_elsewhere.sh
     bash tests/test_dev_shell_linked_worktree.sh
 
-# Compile each workflow-selected engine's real reader against the shipping lock.
-# Needs an adjacent Reprobuild Git checkout containing the selected revisions
-# (or --reprobuild <dir> with a source tree of that revision) and python3.
+# Compile the CI engine's real reader (the fleet Reprobuild pin) against the
+# shipping lock. Needs adjacent metacraft-github-actions (pins/reprobuild.json)
+# and Reprobuild Git checkouts, the latter containing the pinned revision
+# (or --reprobuild <dir> with a source tree of that revision), and python3.
 test-ci-engine-lock:
     python3 tests/test_ci_engine_reads_committed_lock.py
