@@ -180,6 +180,33 @@ proc readEventHistory*(client: HarborClient; sessionId: string;
     raise newException(HarborError, response.body)
   eventHistoryFromJson(parseJson(response.body))
 
+proc readEventHistoryJson*(client: HarborClient; sessionId: string;
+    limit = 0; before = 0'i64): JsonNode =
+  ## `GET /api/v1/sessions/{id}/events/history` as the server's JSON: the
+  ## newest `limit` events (the server's default when 0, at most 200), newest
+  ## first, older than `before` (a timestamp in ms) when it is not 0, with
+  ## `total_count`, `has_more` and `oldest_timestamp`. For a reader that folds
+  ## the events as sent, with every field the typed `readEventHistory` drops.
+  ##
+  ## The history counts every event of the session, the first included; that
+  ## event is the one the session's stream (`followSessionEvents`) sends
+  ## without an id, so the event at position p, oldest first, is the stream's
+  ## frame of id p - 1 (measured against a running server, 2026-11-27).
+  let response = client.transport.request(newRequest(
+    hmGet,
+    client.baseUrl & historyPath(sessionId,
+      EventHistoryQuery(limit: limit, before: before)),
+    "",
+    @[header("Accept", "application/json")] & client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, "Harbor session event history failed (HTTP " &
+      $response.status & "): " & response.body)
+  result = parseJson(response.body)
+  if result.kind != JObject or result{"events"}.isNil or
+      result{"events"}.kind != JArray:
+    raise newException(HarborError,
+      "Harbor session event history is not an events page: " & response.body)
+
 proc parseSseEvents*(sseText: string): seq[HarborEvent] =
   var events: seq[HarborEvent] = @[]
   var dataLines: seq[string] = @[]
@@ -352,6 +379,32 @@ proc followSessionLifecycle*(client: HarborClient; onFrame: HarborFrameCallback;
   let response = client.transport.request(request)
   if response.status < 200 or response.status >= 300:
     raise newException(HarborError, "Harbor session lifecycle feed failed (HTTP " &
+      $response.status & "): " & response.body)
+  for frame in parseSseFrames(response.body):
+    if not onFrame(frame): return
+
+proc followSessionEvents*(client: HarborClient; sessionId: string;
+    onFrame: HarborFrameCallback; after = "") =
+  ## Follows `GET /api/v1/sessions/{id}/events`, handing each frame (event
+  ## `session`, the event's JSON in `data`) to `onFrame` until it returns
+  ## false. Opened with no `after`, the server replays the whole session and
+  ## then follows it live; with `after`, the last id the caller applied, sent
+  ## as `Last-Event-ID`, it resends that event and then sends the ones after
+  ## it. Each event has a sequential id from 1, except the first frame of a
+  ## connection, which carries none: the session's first event on a replay
+  ## from the start, the resent event `after` on a resume (measured against a
+  ## running server, 2026-11-27). Unlike `streamSessionEvents`, the frames
+  ## are not parsed into typed events.
+  var headers = @[header("Accept", "text/event-stream")] & client.auth.authHeaders()
+  if after.len > 0: headers.add header("Last-Event-ID", after)
+  let request = newRequest(hmGet,
+    client.baseUrl & "/api/v1/sessions/" & sessionId & "/events", "", headers)
+  if client.frameStreamTransport != nil:
+    client.frameStreamTransport(request, onFrame)
+    return
+  let response = client.transport.request(request)
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, "Harbor session event stream failed (HTTP " &
       $response.status & "): " & response.body)
   for frame in parseSseFrames(response.body):
     if not onFrame(frame): return
