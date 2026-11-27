@@ -8,7 +8,7 @@
 ## is read, deterministically and on both the native and the JS backend; a
 ## live server can do neither. The same calls against the live server, over
 ## the native streaming transport, are `test_real_server_fleet.nim`.
-import std/[json, strutils]
+import std/[json, sequtils, strutils]
 import unittest
 import nim_everywhere
 import nim_agent_harbor
@@ -150,6 +150,35 @@ suite "listing sessions":
     check recorder.requests.len == 2
     check recorder.requests[0].url == base & "/api/v1/sessions?page=1&perPage=200"
     check recorder.requests[1].url == base & "/api/v1/sessions?page=2&perPage=200"
+
+  test "nextPage as the server sends it, a path, is followed":
+    # The shape of a real ah server's page (ah 0.6.17-dev, 2026-11-27):
+    # `nextPage` is the next page's path, not its number.
+    let recorder = Recorder()
+    let client = newHarborClient(base, recorder.answering(
+      proc(req: HttpRequest): HttpResponse =
+        if "page=1&" in req.url:
+          ok($(%*{"items": [{"id": "a"}], "total": 3,
+                  "nextPage": "/api/v1/sessions?page=2&perPage=200"}))
+        elif "page=2&" in req.url:
+          ok($(%*{"items": [{"id": "b"}], "total": 3,
+                  "nextPage": "/api/v1/sessions?status=completed&page=3&perPage=200"}))
+        else:
+          ok($(%*{"items": [{"id": "c"}], "total": 3}))))
+    let ids = client.listAllSessions().mapIt(it["id"].getStr())
+    check ids == @["a", "b", "c"]
+    check recorder.requests.len == 3
+    check recorder.requests[2].url == base & "/api/v1/sessions?page=3&perPage=200"
+    check sessionListPageFromJson(%*{"items": [], "total": 0,
+      "nextPage": "/api/v1/sessions?perPage=50&page=7"}).nextPage == 7
+
+  test "a nextPage path naming no page raises rather than reading as the last page":
+    let client = newHarborClient(base, Recorder().answering(
+      proc(req: HttpRequest): HttpResponse =
+        ok($(%*{"items": [{"id": "a"}], "total": 2,
+                "nextPage": "/api/v1/sessions?cursor=opaque"}))))
+    expect HarborError:
+      discard client.listAllSessions()
 
   test "a nextPage that does not advance raises instead of looping":
     let client = newHarborClient(base, Recorder().answering(

@@ -1,4 +1,4 @@
-import std/json
+import std/[json, strutils]
 
 type
   HarborError* = object of CatchableError
@@ -509,11 +509,33 @@ proc eventHistoryFromJson*(node: JsonNode): EventHistoryResponse =
   result.totalCount = historyNode{"total_count"}.wireInt(
     historyNode{"totalCount"}.wireInt(result.events.len))
 
+proc nextPageNumber(node: JsonNode): int =
+  ## The page `nextPage` names. A server sends the next page's path
+  ## (`/api/v1/sessions?page=2&perPage=50`, measured 2026-11-27); a number
+  ## is read as one. Absent, null or "" is no next page (0). A path that
+  ## names no `page` raises, so a changed paging scheme is never read as
+  ## the last page.
+  if node.isNil or node.kind == JNull: return 0
+  if node.kind == JInt: return node.wireInt(0)
+  if node.kind != JString:
+    raise newException(HarborError, "Harbor session list nextPage is neither a path nor a number")
+  let path = node.getStr()
+  if path.len == 0: return 0
+  let q = path.find('?')
+  if q >= 0:
+    for part in path[q + 1 .. ^1].split('&'):
+      if part.startsWith("page="):
+        try:
+          return parseInt(part[5 .. ^1])
+        except ValueError:
+          break
+  raise newException(HarborError, "Harbor session list nextPage names no page: " & path)
+
 proc sessionListPageFromJson*(node: JsonNode): SessionListPage =
-  ## Reads a `GET /api/v1/sessions` body. `nextPage` may be absent or null
-  ## (no next page; today's server omits it when everything fits). A body
-  ## that is not an object with an `items` array raises `HarborError`, so a
-  ## changed response is never read as an empty fleet.
+  ## Reads a `GET /api/v1/sessions` body. `nextPage` is the next page's path
+  ## or number; absent or null when this is the last page. A body that is
+  ## not an object with an `items` array raises `HarborError`, so a changed
+  ## response is never read as an empty fleet.
   if node.isNil or node.kind != JObject or node{"items"}.isNil or
       node["items"].kind != JArray:
     raise newException(HarborError,
@@ -521,4 +543,4 @@ proc sessionListPageFromJson*(node: JsonNode): SessionListPage =
   for item in node["items"].items:
     result.items.add item
   result.total = node{"total"}.wireInt(result.items.len)
-  result.nextPage = node{"nextPage"}.wireInt(0)
+  result.nextPage = nextPageNumber(node{"nextPage"})
