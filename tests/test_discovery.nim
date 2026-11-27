@@ -64,6 +64,19 @@ suite "where the PID file is":
       check daemonPidFilePath(lookup({"HOME": "/Users/u"})) ==
         "/Users/u/Library/Application Support/agent-harbor/server.pid"
 
+  test "every OS's rule, whichever OS runs the test":
+    # The rule takes the OS as a value, so the JavaScript build (which learns
+    # the OS at run time) and this one answer from the same rule.
+    check daemonPidFilePathFor(dhMacos, lookup({"HOME": "/Users/u",
+      "XDG_STATE_HOME": "/x"})) ==
+      "/Users/u/Library/Application Support/agent-harbor/server.pid"
+    check daemonPidFilePathFor(dhLinux, lookup({"HOME": "/home/u"})) ==
+      "/home/u/.local/state/agent-harbor/server.pid"
+    check daemonPidFilePathFor(dhWindows, lookup({"LOCALAPPDATA": "C:\\L"})) ==
+      "C:\\L\\agent-harbor\\server.pid"
+    check daemonPidFilePath(lookup({"HOME": "/h", "LOCALAPPDATA": "C:\\L"})) ==
+      daemonPidFilePathFor(thisHostOs(), lookup({"HOME": "/h", "LOCALAPPDATA": "C:\\L"}))
+
   test "no home and no override: no path":
     when not defined(windows):
       check daemonPidFilePath(lookup(newSeq[(string, string)]())) == ""

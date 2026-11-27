@@ -21,6 +21,7 @@ build-js:
     nim js {{paths}} tests/test_agent_harbor.nim
     nim js {{paths}} tests/test_session_fleet.nim
     nim js {{paths}} tests/test_inbox.nim
+    nim js {{paths}} tests/test_discovery_node.nim
 
 test: check-dependencies test-native test-js
 
@@ -40,6 +41,7 @@ test-js:
     bash tools/nim-js-test-gate.sh {{paths}} tests/test_agent_harbor.nim
     bash tools/nim-js-test-gate.sh {{paths}} tests/test_session_fleet.nim
     bash tools/nim-js-test-gate.sh {{paths}} tests/test_inbox.nim
+    bash tools/nim-js-test-gate.sh {{paths}} tests/test_discovery_node.nim
 
 lint: check-dependencies lint-nim lint-nix
 
