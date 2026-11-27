@@ -122,6 +122,8 @@ const portableTestSpecs: seq[AgentHarborTestSpec] = @[
     binary: "build/test-bin/test_agent_harbor"),
   AgentHarborTestSpec(source: "tests/test_session_fleet.nim",
     binary: "build/test-bin/test_session_fleet"),
+  AgentHarborTestSpec(source: "tests/test_discovery.nim",
+    binary: "build/test-bin/test_discovery"),
 ]
 
 package nim_agent_harbor:

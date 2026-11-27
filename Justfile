@@ -11,6 +11,7 @@ build-native:
     nim c {{paths}} tests/test_real_server_auth.nim
     nim c {{paths}} tests/test_real_server_fleet.nim
     nim c {{paths}} tests/test_session_fleet.nim
+    nim c {{paths}} tests/test_discovery.nim
     nim c --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c {{paths}} tests/test_nimcache_is_worktree_local.nim
 
@@ -26,6 +27,7 @@ test-native:
     nim c -r {{paths}} tests/test_real_server_auth.nim
     nim c -r {{paths}} tests/test_real_server_fleet.nim
     nim c -r {{paths}} tests/test_session_fleet.nim
+    nim c -r {{paths}} tests/test_discovery.nim
     nim c -r --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c -r {{paths}} tests/test_nimcache_is_worktree_local.nim
 
@@ -44,6 +46,7 @@ lint-nim:
     nim check {{paths}} tests/test_real_server_auth.nim
     nim check {{paths}} tests/test_real_server_fleet.nim
     nim check {{paths}} tests/test_session_fleet.nim
+    nim check {{paths}} tests/test_discovery.nim
     nim check --threads:on {{paths}} tests/test_native_deadlines.nim
     nim check {{paths}} tests/test_nimcache_is_worktree_local.nim
 
