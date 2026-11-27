@@ -1,0 +1,93 @@
+{
+  "items": [
+    {
+      "id": "5a7e0c1d-0000-4000-8000-00000000f1ee",
+      "org_id": "00000000-0000-0000-0000-000000000000",
+      "task": {
+        "prompt": "fleet capture probe"
+      },
+      "agent": {
+        "agent": {
+          "software": "Acp",
+          "version": "latest"
+        },
+        "model": "mock",
+        "count": 1,
+        "acp_stdio_launch_command": {
+          "binary": "true"
+        }
+      },
+      "runtime": {
+        "type": "local",
+        "resources": {
+          "cpu": 0,
+          "memoryMiB": 0
+        }
+      },
+      "workspace": {
+        "snapshotProvider": "isolated",
+        "mountPath": "/tmp/ah-fleet-capture/repo"
+      },
+      "vcs": {
+        "repo_url": "file:///tmp/ah-fleet-capture/repo",
+        "branch": "main",
+        "commit": ""
+      },
+      "sandbox": {
+        "mode": "dynamic",
+        "debug": true,
+        "allow-network": false,
+        "containers": true,
+        "vm": true,
+        "allow-kvm": true,
+        "tmpfs-size": "8589934592",
+        "limits": {
+          "pids-max": 8192,
+          "memory-max": "17179869184"
+        },
+        "allow-escape": true
+      },
+      "status": "failed",
+      "createdAt": "2026-11-27T05:20:42.347432650Z",
+      "updatedAt": "2026-11-27T05:20:43.955105901Z",
+      "started_at": "2026-11-27T05:20:42.347Z",
+      "ended_at": "2026-11-27T05:20:43.955Z",
+      "startingPointFallbackReason": "(redacted)",
+      "awaiting_input": false,
+      "recent_events": [
+        {
+          "type": "workspace",
+          "status": "error",
+          "working_copy_mode": "isolated",
+          "error": "Workspace prepare failed (redacted)",
+          "timestamp": 1795756843491
+        },
+        {
+          "type": "status",
+          "status": "failed",
+          "timestamp": 1795756843498
+        },
+        {
+          "type": "status",
+          "status": "failed",
+          "timestamp": 1795756843955
+        }
+      ],
+      "state": "ended",
+      "state_source": "session-status",
+      "priority": "normal",
+      "handle": {
+        "scope": "host",
+        "qualifier": "fleet-host",
+        "name": "sunny-zebra-39",
+        "display": "fleet-host:sunny-zebra-39"
+      },
+      "links": {
+        "self": "/api/v1/sessions/5a7e0c1d-0000-4000-8000-00000000f1ee",
+        "events": "/api/v1/sessions/5a7e0c1d-0000-4000-8000-00000000f1ee/events",
+        "logs": "/api/v1/sessions/5a7e0c1d-0000-4000-8000-00000000f1ee/logs"
+      }
+    }
+  ],
+  "total": 1
+}

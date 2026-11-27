@@ -1,0 +1,11 @@
+event: lifecycle
+data: {"kind":"session_status_changed","sessionId":"5a7e0c1d-0000-4000-8000-00000000f1ee","status":"provisioning","previousStatus":"queued","agent":"acp","repo":"file:///tmp/ah-fleet-capture/repo","createdAt":"2026-11-27T05:20:42.347432650Z","updatedAt":"2026-11-27T05:20:42.347432650Z","at":"2026-11-27T05:20:43.191250497Z"}
+id: ec97071de8b44550-2
+
+event: lifecycle
+data: {"kind":"session_completed","sessionId":"5a7e0c1d-0000-4000-8000-00000000f1ee","status":"failed","previousStatus":"provisioning","agent":"acp","repo":"file:///tmp/ah-fleet-capture/repo","createdAt":"2026-11-27T05:20:42.347432650Z","updatedAt":"2026-11-27T05:20:43.431675809Z","at":"2026-11-27T05:20:43.490020481Z"}
+id: ec97071de8b44550-3
+
+event: caught_up
+data: {"cursor":"ec97071de8b44550-3","replayed":2}
+

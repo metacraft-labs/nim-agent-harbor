@@ -56,8 +56,13 @@ when defined(windows):
 else:
   proc isLocalCancel(error: ref OSError): bool = false
 
-proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
-  result = proc(req: nim_everywhere.HttpRequest; onEvent: HarborStreamCallback) =
+proc nativeHarborFrameStream*(timeoutMs = 1_800_000): HarborFrameStreamTransport =
+  ## An event stream over its own HTTP connection, read incrementally: each
+  ## frame goes to `onFrame` as soon as its blank line arrives. `timeoutMs`
+  ## bounds the wait for the headers and for every later read, so a stream
+  ## that stalls raises `HarborError`, as do a refusal and a stream the
+  ## server closes; returning false from `onFrame` stops it cleanly.
+  result = proc(req: nim_everywhere.HttpRequest; onFrame: HarborFrameCallback) =
     proc consume() {.async.} =
       let http = newAsyncHttpClient()
       defer: http.close()
@@ -158,11 +163,12 @@ proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
         raise newException(HarborError, "Harbor event stream connection timed out")
       let resp = await request
       var pending = ""
-      var data: seq[string] = @[]
-      var cursor = ""
+      var reader = initSseReader()
+      var frame: SseFrame
       try:
         if int(resp.code) < 200 or int(resp.code) >= 300:
-          raise newException(HarborError, await resp.body)
+          raise newException(HarborError, "Harbor event stream refused (HTTP " &
+            $int(resp.code) & "): " & (await resp.body))
         while true:
           let next = resp.bodyStream.read()
           pendingRead = next
@@ -171,28 +177,29 @@ proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
           let (available, chunk) = await next
           pendingRead = nil
           if not available:
-            raise newException(HarborError, "Harbor event stream closed before the turn ended")
+            raise newException(HarborError, "Harbor event stream closed by the server")
           pending.add chunk
           while true:
             let eol = pending.find('\n')
             if eol < 0: break
-            let line = pending[0 ..< eol].strip(leading = false, chars = {'\r'})
+            let line = pending[0 ..< eol]
             pending = pending[eol + 1 .. ^1]
-            if line.len == 0:
-              if data.len > 0:
-                let event = eventFromJson(parseJson(data.join("\n")))
-                data.setLen(0)
-                if not onEvent(event, cursor): return
-                cursor = ""
-            elif line.startsWith("data:"):
-              data.add line[5 .. ^1].strip(leading = true, trailing = false)
-            elif line.startsWith("id:"):
-              cursor = line[3 .. ^1].strip()
+            if reader.feedLine(line, frame) and not onFrame(frame): return
       finally:
         await stopReader(resp)
     waitFor consume()
+
+proc nativeHarborStream*(timeoutMs = 1_800_000): HarborStreamTransport =
+  ## A session's event stream over `nativeHarborFrameStream`: each frame's
+  ## data is one Harbor event, and its id the cursor to resume from ("" when
+  ## the frame carried none).
+  let frames = nativeHarborFrameStream(timeoutMs)
+  result = proc(req: nim_everywhere.HttpRequest; onEvent: HarborStreamCallback) =
+    frames(req, proc(frame: SseFrame): bool =
+      onEvent(eventFromJson(parseJson(frame.data)), frame.id))
 
 proc newNativeHarborClient*(baseUrl: string;
     auth = HarborAuth(kind: akNone)): HarborClient =
   result = newHarborClient(baseUrl, nativeHarborTransport(), auth)
   result.streamTransport = nativeHarborStream()
+  result.frameStreamTransport = nativeHarborFrameStream()

@@ -166,6 +166,24 @@ type
     hasMore*: bool
     oldestTimestamp*: int64
     totalCount*: int
+  SseFrame* = object
+    ## One dispatched event of a `text/event-stream` body.
+    ## https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation
+    event*: string  ## the `event:` field, `message` when the block named none
+    data*: string   ## the `data:` lines joined by newlines
+    id*: string     ## the `id:` field of this block, "" when it carried none
+  SessionListQuery* = object
+    ## Filters and paging of `GET /api/v1/sessions`; an empty or zero field
+    ## is left out of the query.
+    status*: string
+    page*: int
+    perPage*: int
+  SessionListPage* = object
+    ## One page of `GET /api/v1/sessions`. Each item is a session row as the
+    ## server sent it; nim-agents reads the rows into its fleet records.
+    items*: seq[JsonNode]
+    total*: int
+    nextPage*: int  ## 0 when the server names no next page
 
 proc apiKeyAuth*(token: string): HarborAuth =
   HarborAuth(kind: akApiKey, token: token)
@@ -490,3 +508,17 @@ proc eventHistoryFromJson*(node: JsonNode): EventHistoryResponse =
     historyNode{"oldestTimestamp"}.getBiggestInt(0))
   result.totalCount = historyNode{"total_count"}.wireInt(
     historyNode{"totalCount"}.wireInt(result.events.len))
+
+proc sessionListPageFromJson*(node: JsonNode): SessionListPage =
+  ## Reads a `GET /api/v1/sessions` body. `nextPage` may be absent or null
+  ## (no next page; today's server omits it when everything fits). A body
+  ## that is not an object with an `items` array raises `HarborError`, so a
+  ## changed response is never read as an empty fleet.
+  if node.isNil or node.kind != JObject or node{"items"}.isNil or
+      node["items"].kind != JArray:
+    raise newException(HarborError,
+      "Harbor session list is not an object with an items array")
+  for item in node["items"].items:
+    result.items.add item
+  result.total = node{"total"}.wireInt(result.items.len)
+  result.nextPage = node{"nextPage"}.wireInt(0)

@@ -120,6 +120,8 @@ const portableTestSpecs: seq[AgentHarborTestSpec] = @[
     binary: "build/test-bin/test_native_deadlines"),
   AgentHarborTestSpec(source: "tests/test_agent_harbor.nim",
     binary: "build/test-bin/test_agent_harbor"),
+  AgentHarborTestSpec(source: "tests/test_session_fleet.nim",
+    binary: "build/test-bin/test_session_fleet"),
 ]
 
 package nim_agent_harbor:
@@ -203,7 +205,10 @@ package nim_agent_harbor:
         defines = (if source == "tests/test_native_stream_lifecycle.nim":
           @["futureLogging"] else: @[]),
         actionId = "nim_agent_harbor.test_build." & stem,
-        extraInputs = @["src", "nim_agent_harbor.nimble"])
+        # The fleet test embeds the captured server responses it reads.
+        extraInputs = @["src", "nim_agent_harbor.nimble"] &
+          (if source == "tests/test_session_fleet.nim": @["tests/fixtures/fleet"]
+           else: @[]))
       # Bind Nim's real platform C backend to the compile action.
       when defined(macosx):
         appendRegisteredActionToolIdentityRefs(edge.action.id, ["clang"])
