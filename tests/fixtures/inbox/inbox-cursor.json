@@ -1,0 +1,75 @@
+{
+  "items": [
+    {
+      "id": "01HW00000000000000000000A1@1793826001000",
+      "kind": "blocked_question",
+      "session": {
+        "id": "01HW00000000000000000000A1",
+        "title": "Rework the vault unsealing",
+        "host": "host-a",
+        "agent": "Claude",
+        "status": "running",
+        "label": "Rework the vault unsealing (host-a)"
+      },
+      "priority": "normal",
+      "effectivePriority": "normal",
+      "position": 1,
+      "explanation": "Normal priority \u00b7 stopped 2 min ago",
+      "enteredAt": "2026-11-27T08:01:00Z",
+      "question": "Which key ring?"
+    },
+    {
+      "id": "01HW00000000000000000000B2@1793826002000",
+      "kind": "ended_turn",
+      "session": {
+        "id": "01HW00000000000000000000B2",
+        "title": "Split the parser",
+        "host": "host-a",
+        "agent": "Claude",
+        "status": "running",
+        "label": "Split the parser (host-a)"
+      },
+      "priority": "normal",
+      "effectivePriority": "normal",
+      "position": 2,
+      "explanation": "Normal priority \u00b7 stopped 2 min ago",
+      "enteredAt": "2026-11-27T08:02:00Z"
+    },
+    {
+      "id": "01HW00000000000000000000C3@1793826003000",
+      "kind": "permission_gate",
+      "session": {
+        "id": "01HW00000000000000000000C3",
+        "title": "Bump the toolchain",
+        "host": "host-a",
+        "agent": "Claude",
+        "status": "running",
+        "label": "Bump the toolchain (host-a)"
+      },
+      "priority": "normal",
+      "effectivePriority": "normal",
+      "position": 3,
+      "explanation": "Normal priority \u00b7 stopped 2 min ago",
+      "enteredAt": "2026-11-27T08:03:00Z"
+    }
+  ],
+  "generatedAt": "2026-11-27T08:10:00Z",
+  "nextChangeAt": "2026-11-27T08:13:40Z",
+  "cursor": {
+    "name": "default",
+    "itemId": null,
+    "visitedDepth": 0,
+    "cursorVersion": 0
+  },
+  "ahead": {
+    "next": [
+      "01HW00000000000000000000A1@1793826001000",
+      "01HW00000000000000000000B2@1793826002000",
+      "01HW00000000000000000000A1@1793826001000"
+    ],
+    "prev": [
+      "01HW00000000000000000000C3@1793826003000"
+    ],
+    "basedOn": 0
+  }
+}

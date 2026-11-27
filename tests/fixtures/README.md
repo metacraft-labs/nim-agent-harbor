@@ -43,3 +43,35 @@ workspace error and `startingPointFallbackReason`, are replaced by
 stream body: the HTTP chunk-size lines of the raw socket read were removed,
 and the open stream was cut after its last frame. `test_real_server_fleet.nim`
 checks the same calls against a live server.
+
+# Inbox fixtures
+
+`tests/fixtures/inbox/` holds the answers `test_inbox.nim` reads. Two were
+captured; the rest are **shaped from the REST contract, not captured**,
+because no server serves the inbox stream or the cursors yet:
+
+| File | Request | Provenance |
+| --- | --- | --- |
+| `inbox-empty.json` | `GET /api/v1/inbox` on a server with no sessions | captured |
+| `cursor-no-route.json` | `POST /api/v1/inbox/cursors/default/next` on a server without cursors (404) | captured |
+| `inbox-cursor.json` | `GET /api/v1/inbox?cursor=default` with three items waiting and a fresh cursor | shaped |
+| `cursor-next.json` | the first Next on that cursor | shaped |
+| `cursor-empty.json` | a move with nothing waiting | shaped |
+| `inbox-events.sse` | `GET /api/v1/inbox/events`: `resync`, then `changed` for an item entering, a cursor move and an item leaving | shaped |
+
+The captures were made on 2026-11-27 on a Linux workstation from a private
+`ah server start`, as above, using
+`/nix/store/855k6na6kfa0lcrj95nsb6m13f59xbsy-agent-harbor-cli-0.6.17/bin/ah`
+(`ah 0.6.17-dev`, a different build from the fleet captures' under the same
+version string); that build answers `GET /api/v1/inbox/events` with 404
+too. Only `generatedAt` varies between runs.
+
+The shaped files follow the contract's text: the items as `GET
+/api/v1/inbox` lists them; `ahead` as `{"next", "prev", "basedOn"}`; a cursor
+answer as `{"item", "visitedDepth", "cursorVersion", "ahead"}`; stream frames
+with `id` `<epoch>:<seq>` and a `changed` frame's `entered`, `left`,
+`reasons` and `cursors`. Two parts are guesses the contract does not spell
+out, and the cases that read them say so in their names: the `cursor` block
+of a read with `?cursor=` (`name`, `itemId`, `visitedDepth`,
+`cursorVersion`), and an `ahead` on each entry of a frame's `cursors`. They
+are replaced by captures when a server serves them.

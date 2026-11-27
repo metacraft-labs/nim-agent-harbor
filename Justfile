@@ -12,12 +12,14 @@ build-native:
     nim c {{paths}} tests/test_real_server_fleet.nim
     nim c {{paths}} tests/test_session_fleet.nim
     nim c {{paths}} tests/test_discovery.nim
+    nim c {{paths}} tests/test_inbox.nim
     nim c --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 build-js:
     nim js {{paths}} tests/test_agent_harbor.nim
     nim js {{paths}} tests/test_session_fleet.nim
+    nim js {{paths}} tests/test_inbox.nim
 
 test: check-dependencies test-native test-js
 
@@ -28,12 +30,14 @@ test-native:
     nim c -r {{paths}} tests/test_real_server_fleet.nim
     nim c -r {{paths}} tests/test_session_fleet.nim
     nim c -r {{paths}} tests/test_discovery.nim
+    nim c -r {{paths}} tests/test_inbox.nim
     nim c -r --threads:on {{paths}} tests/test_native_deadlines.nim
     nim c -r {{paths}} tests/test_nimcache_is_worktree_local.nim
 
 test-js:
     bash tools/nim-js-test-gate.sh {{paths}} tests/test_agent_harbor.nim
     bash tools/nim-js-test-gate.sh {{paths}} tests/test_session_fleet.nim
+    bash tools/nim-js-test-gate.sh {{paths}} tests/test_inbox.nim
 
 lint: check-dependencies lint-nim lint-nix
 
@@ -47,6 +51,7 @@ lint-nim:
     nim check {{paths}} tests/test_real_server_fleet.nim
     nim check {{paths}} tests/test_session_fleet.nim
     nim check {{paths}} tests/test_discovery.nim
+    nim check {{paths}} tests/test_inbox.nim
     nim check --threads:on {{paths}} tests/test_native_deadlines.nim
     nim check {{paths}} tests/test_nimcache_is_worktree_local.nim
 

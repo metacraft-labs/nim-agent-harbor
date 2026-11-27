@@ -1,0 +1,33 @@
+{
+  "item": {
+    "id": "01HW00000000000000000000A1@1793826001000",
+    "kind": "blocked_question",
+    "session": {
+      "id": "01HW00000000000000000000A1",
+      "title": "Rework the vault unsealing",
+      "host": "host-a",
+      "agent": "Claude",
+      "status": "running",
+      "label": "Rework the vault unsealing (host-a)"
+    },
+    "priority": "normal",
+    "effectivePriority": "normal",
+    "position": 1,
+    "explanation": "Normal priority \u00b7 stopped 2 min ago",
+    "enteredAt": "2026-11-27T08:01:00Z",
+    "question": "Which key ring?"
+  },
+  "visitedDepth": 0,
+  "cursorVersion": 1,
+  "ahead": {
+    "next": [
+      "01HW00000000000000000000B2@1793826002000",
+      "01HW00000000000000000000A1@1793826001000",
+      "01HW00000000000000000000B2@1793826002000"
+    ],
+    "prev": [
+      "01HW00000000000000000000C3@1793826003000"
+    ],
+    "basedOn": 1
+  }
+}

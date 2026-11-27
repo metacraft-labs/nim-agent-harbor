@@ -1,0 +1,18 @@
+: keep-alive
+
+event: resync
+id: 3f6c2a9d1e0b4c77:1
+data: {"epoch":"3f6c2a9d1e0b4c77","seq":1,"reason":"connected","nextChangeAt":"2026-11-27T08:13:40Z"}
+
+event: changed
+id: 3f6c2a9d1e0b4c77:2
+data: {"epoch":"3f6c2a9d1e0b4c77","seq":2,"entered":["01HW00000000000000000000C3@1793826003000"],"reasons":["entered"],"nextChangeAt":"2026-11-27T08:13:40Z"}
+
+event: changed
+id: 3f6c2a9d1e0b4c77:3
+data: {"epoch":"3f6c2a9d1e0b4c77","seq":3,"reasons":["cursor"],"cursors":[{"name":"default","itemId":"01HW00000000000000000000A1@1793826001000","cursorVersion":1,"ahead":{"next":["01HW00000000000000000000B2@1793826002000","01HW00000000000000000000A1@1793826001000","01HW00000000000000000000B2@1793826002000"],"prev":["01HW00000000000000000000C3@1793826003000"],"basedOn":1}}]}
+
+event: changed
+id: 3f6c2a9d1e0b4c77:4
+data: {"epoch":"3f6c2a9d1e0b4c77","seq":4,"left":["01HW00000000000000000000A1@1793826001000"],"reasons":["left"]}
+

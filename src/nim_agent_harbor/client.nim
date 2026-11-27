@@ -287,6 +287,18 @@ proc sessionsPath(query: SessionListQuery): string =
   if query.perPage > 0: parts.add "perPage=" & $query.perPage
   "/api/v1/sessions" & queryJoin(parts)
 
+proc parseBodyOrRaise(body, what: string): JsonNode =
+  ## The body as JSON, or `HarborError` naming `what`. On the JS backend
+  ## `parseJson` throws the engine's own `SyntaxError`, which no Nim
+  ## exception type catches, so the bare `except` is what keeps a body that
+  ## is not JSON from escaping as a foreign exception there.
+  try:
+    result = parseJson(body)
+  except JsonParsingError as error:
+    raise newException(HarborError, what & " is not JSON: " & error.msg)
+  except:
+    raise newException(HarborError, what & " is not JSON")
+
 proc listSessions*(client: HarborClient;
     query = SessionListQuery()): SessionListPage =
   ## One page of `GET /api/v1/sessions`: the sessions the caller may list.
@@ -298,10 +310,7 @@ proc listSessions*(client: HarborClient;
   if response.status < 200 or response.status >= 300:
     raise newException(HarborError, "Harbor session list failed (HTTP " &
       $response.status & "): " & response.body)
-  try:
-    sessionListPageFromJson(parseJson(response.body))
-  except JsonParsingError as error:
-    raise newException(HarborError, "Harbor session list is not JSON: " & error.msg)
+  sessionListPageFromJson(parseBodyOrRaise(response.body, "Harbor session list"))
 
 proc listAllSessions*(client: HarborClient; query = SessionListQuery();
     perPage = 200): seq[JsonNode] =
@@ -343,6 +352,152 @@ proc followSessionLifecycle*(client: HarborClient; onFrame: HarborFrameCallback;
   let response = client.transport.request(request)
   if response.status < 200 or response.status >= 300:
     raise newException(HarborError, "Harbor session lifecycle feed failed (HTTP " &
+      $response.status & "): " & response.body)
+  for frame in parseSseFrames(response.body):
+    if not onFrame(frame): return
+
+# ---------------------------------------------------------------------------
+# The inbox and its cursors
+# ---------------------------------------------------------------------------
+#
+# Every request shape the inbox calls send is in this section, so a change of
+# the wire is made here alone: the paths, the query parameters, the body of a
+# cursor move. The answers are returned as JSON for the caller to read (as
+# `listSessions` returns its items), so the items' and the cursor's shapes are
+# read in one place too, by the caller.
+
+type
+  InboxQuery* = object
+    ## The scope of an inbox read or stream, as on `GET /api/v1/sessions`.
+    cursor*: string
+      ## `?cursor=<name>`: the read also carries that cursor's position and
+      ## the targets of its next presses (`ahead`). "" for none.
+    orgId*, projectId*: string
+
+  InboxCursorDirection* = enum
+    icNext = "next"
+    icPrev = "prev"
+
+  InboxCursorMove* = object
+    ## One press of Next or Prev, sent to the server after the front-end has
+    ## already switched to `landedOn`.
+    direction*: InboxCursorDirection
+    expectedVersion*: int64
+      ## The `cursorVersion` the caller's `ahead` was based on;
+      ## `NoCursorVersion` when it holds none.
+    landedOn*: string
+      ## The item id the caller switched to; "" when it switched to none
+      ## and waits for the answer.
+
+const
+  DefaultInboxCursor* = "default"
+    ## The caller's one walk through the inbox, shared by all of its devices
+    ## and front-ends.
+  NoCursorVersion* = -1'i64
+
+proc cursorMove*(direction: InboxCursorDirection;
+    expectedVersion = NoCursorVersion; landedOn = ""): InboxCursorMove =
+  InboxCursorMove(direction: direction, expectedVersion: expectedVersion,
+    landedOn: landedOn)
+
+proc validCursorName*(name: string): bool =
+  ## A cursor name the server accepts: `[a-z0-9-]{1,64}`.
+  if name.len < 1 or name.len > 64: return false
+  for c in name:
+    if c notin {'a'..'z', '0'..'9', '-'}: return false
+  true
+
+proc inboxQueryParts(query: InboxQuery): seq[string] =
+  result.addEncoded("cursor", query.cursor)
+  result.addEncoded("org_id", query.orgId)
+  result.addEncoded("project_id", query.projectId)
+
+proc inboxPath*(query = InboxQuery()): string =
+  "/api/v1/inbox" & queryJoin(inboxQueryParts(query))
+
+proc inboxEventsPath*(query = InboxQuery()): string =
+  var scoped = query
+  scoped.cursor = ""   # the stream names the caller's cursors itself
+  "/api/v1/inbox/events" & queryJoin(inboxQueryParts(scoped))
+
+proc cursorMovePath*(name: string; direction: InboxCursorDirection;
+    query = InboxQuery()): string =
+  var scoped = query
+  scoped.cursor = ""
+  "/api/v1/inbox/cursors/" & name & "/" & $direction &
+    queryJoin(inboxQueryParts(scoped))
+
+proc cursorMoveBody*(move: InboxCursorMove): string =
+  ## `{"expectedVersion", "landedOn"}`, each only when the caller has one.
+  var body = newJObject()
+  if move.expectedVersion >= 0: body["expectedVersion"] = %move.expectedVersion
+  if move.landedOn.len > 0: body["landedOn"] = %move.landedOn
+  $body
+
+proc checkCursorName(name: string) =
+  if not validCursorName(name):
+    raise newException(HarborError, "Harbor inbox cursor name is invalid: '" &
+      name & "' (expected [a-z0-9-]{1,64})")
+
+proc getInbox*(client: HarborClient; query = InboxQuery()): JsonNode =
+  ## `GET /api/v1/inbox`: every item waiting for the operator, in the
+  ## server's order, and with `query.cursor` that cursor's position and
+  ## `ahead`. A refusal or a body that is not an object with an `items` list
+  ## raises `HarborError`, so a failed read never reads as an empty inbox.
+  if query.cursor.len > 0: checkCursorName(query.cursor)
+  let response = client.transport.request(newRequest(hmGet,
+    client.baseUrl & inboxPath(query), "",
+    @[header("Accept", "application/json")] & client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, "Harbor inbox read failed (HTTP " &
+      $response.status & "): " & response.body)
+  result = parseBodyOrRaise(response.body, "Harbor inbox")
+  if result.kind != JObject or result{"items"}.isNil or
+      result["items"].kind != JArray:
+    raise newException(HarborError, "Harbor inbox has no items list: " &
+      response.body)
+
+proc moveInboxCursor*(client: HarborClient; name: string;
+    move: InboxCursorMove; query = InboxQuery()): JsonNode =
+  ## `POST /api/v1/inbox/cursors/{name}/next` or `…/prev`. Returns the answer
+  ## (`item`, the item landed on or null; `visitedDepth`; `cursorVersion`;
+  ## `ahead`). A refusal, a 404 from a server without cursors among them, or
+  ## an answer without `item` raises `HarborError`: a failed move never
+  ## reads as "nothing to move to".
+  checkCursorName(name)
+  let response = client.transport.request(newRequest(hmPost,
+    client.baseUrl & cursorMovePath(name, move.direction, query),
+    cursorMoveBody(move),
+    @[header("Accept", "application/json"),
+      header("Content-Type", "application/json; charset=utf-8")] &
+      client.auth.authHeaders()))
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, "Harbor inbox cursor " & $move.direction &
+      " failed (HTTP " & $response.status & "): " & response.body)
+  result = parseBodyOrRaise(response.body, "Harbor inbox cursor answer")
+  if result.kind != JObject or not result.hasKey("item"):
+    raise newException(HarborError, "Harbor inbox cursor answer has no item: " &
+      response.body)
+
+proc followInbox*(client: HarborClient; onFrame: HarborFrameCallback;
+    query = InboxQuery(); lastEventId = "") =
+  ## Follows `GET /api/v1/inbox/events`, handing each frame to `onFrame`
+  ## until it returns false. The stream notifies and carries no items:
+  ## `resync` (read the inbox again; always the first frame) and `changed`
+  ## (what changed, and with the `cursor` reason the caller's cursors' moves).
+  ## `id` is `<epoch>:<seq>`. `lastEventId`, sent as `Last-Event-ID`, only
+  ## tells the server this is a reconnection: the stream keeps no history,
+  ## so it starts over with a `resync` either way.
+  var headers = @[header("Accept", "text/event-stream")]
+  if lastEventId.len > 0: headers.add header("Last-Event-ID", lastEventId)
+  let request = newRequest(hmGet, client.baseUrl & inboxEventsPath(query), "",
+    headers & client.auth.authHeaders())
+  if client.frameStreamTransport != nil:
+    client.frameStreamTransport(request, onFrame)
+    return
+  let response = client.transport.request(request)
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, "Harbor inbox stream failed (HTTP " &
       $response.status & "): " & response.body)
   for frame in parseSseFrames(response.body):
     if not onFrame(frame): return

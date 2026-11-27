@@ -128,8 +128,8 @@ suite "listing sessions":
     except HarborError as error:
       check "401" in error.msg
 
-  test "a listing that is not a page object raises":
-    for body in ["[]", "{\"total\":1}", "{\"items\":{}}"]:
+  test "a listing that is not a page object, or not JSON, raises":
+    for body in ["[]", "{\"total\":1}", "{\"items\":{}}", "not json"]:
       let client = newHarborClient(base, Recorder().answering(
         proc(req: HttpRequest): HttpResponse = ok(body)))
       expect HarborError:
