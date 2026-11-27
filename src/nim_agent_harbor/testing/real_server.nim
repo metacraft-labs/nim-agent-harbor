@@ -8,7 +8,9 @@
 ## `AH_SERVER_BIN`. Its state lives in a fresh directory under `/tmp` that is
 ## also its `HOME` and XDG base, so it never sees the operator's own
 ## configuration, sessions or credentials, and it listens on a free loopback
-## port. Native only: it spawns a process and talks plain HTTP.
+## port. Native only: it spawns a process and talks plain HTTP. The
+## environment, the arguments and `probeTask` are `testing/server_launch`'s,
+## shared with the Node harness (`testing/real_server_node`).
 
 when defined(js):
   {.error: "nim_agent_harbor/testing/real_server starts a process; it is native only".}
@@ -18,6 +20,9 @@ from std/httpclient import nil
 from std/httpcore import nil
 import nim_everywhere
 import nim_agent_harbor
+import ./server_launch
+
+export server_launch
 
 type RealServer* = object
   process*: Process
@@ -69,30 +74,15 @@ proc startServer*(binary: string; apiKey = ""; port = Port(0)): RealServer =
   result.root = createTempDir("ahk", "", "/tmp")
   let root = result.root
   let port = if port == Port(0): freePort() else: port
-  result.baseUrl = "http://127.0.0.1:" & $port.int
+  result.baseUrl = serverBaseUrl(port.int)
   let env = newStringTable(modeCaseSensitive)
-  env["PATH"] = getEnv("PATH")
-  env["HOME"] = root
-  for name in ["XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME",
-      "XDG_DATA_HOME", "XDG_CACHE_HOME"]:
-    env[name] = root / name.toLowerAscii()
-  if apiKey.len > 0:
-    env["AH_API_KEY"] = apiKey
-  env["AH_REST_HOST"] = "127.0.0.1"
-  env["AH_REST_PORT"] = $port.int
+  for (name, value) in serverEnv(root, getEnv("PATH"), apiKey, port.int):
+    env[name] = value
   # The caller only owns the server once this returns, so a server that fails
   # to start or come up is stopped and its directory removed here.
   try:
-    # `--task-manager-sock` places the task-manager socket explicitly. Without
-    # it the server derives the path from XDG_RUNTIME_DIR and refuses any base
-    # whose ancestors are not owned by root or the current user, which is the
-    # case inside user-namespace sandboxes. `--acp-agent-cmd true` satisfies the
-    # requirement for at least one ACP agent; no agent is ever started.
     result.process = startProcess(binary, workingDir = root,
-      args = ["server", "start",
-        "--acp-uds", root / "acp.sock",
-        "--task-manager-sock", root / "tm.sock",
-        "--acp-agent-cmd", "true"],
+      args = serverArgs(root),
       env = env,
       options = {poParentStreams})
 
@@ -128,22 +118,3 @@ proc stop*(server: RealServer) =
     server.process.close()
   if server.root.len > 0:
     removeDir(server.root)
-
-proc probeTask*(repoDir, prompt: string): CreateTaskRequest =
-  ## A task the server accepts without running a model: an ACP agent whose
-  ## launch command is `true`. The session it creates fails at workspace
-  ## preparation or agent start, which is enough to produce its lifecycle.
-  CreateTaskRequest(
-    prompt: prompt,
-    repo: RepoConfig(mode: "git", url: "file://" & repoDir, branch: "main"),
-    runtime: defaultRuntime(),
-    workspacePath: repoDir,
-    sandbox: defaultSandbox(),
-    delivery: DeliveryConfig(mode: "branch"),
-    agents: @[AgentConfig(
-      agent: AgentSoftware(software: "acp", version: "latest"),
-      model: "mock",
-      count: 1,
-      acpStdioLaunchCommand: AcpStdioLaunchCommand(binary: "true"))],
-    output: defaultOutput(),
-    labels: newJObject())
