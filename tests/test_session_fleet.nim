@@ -259,3 +259,49 @@ suite "following the lifecycle feed":
       check false
     except HarborError as error:
       check "501" in error.msg
+
+suite "the requests, for a caller with its own transport":
+  # A front-end that cannot use a blocking transport (a JavaScript host on
+  # Node, which follows the feed with `fetch`) sends the same requests the
+  # client sends and reads the answers the same way.
+  test "the list request is the one listSessions sends":
+    let recorder = Recorder()
+    let client = newHarborClient(base, recorder.answering(
+      proc(req: HttpRequest): HttpResponse = ok(sessionsEmptyBody)), apiKeyAuth("k"))
+    let query = SessionListQuery(page: 1, perPage: 200)
+    discard client.listSessions(query)
+    let built = client.listSessionsRequest(query)
+    check built.url == recorder.requests[0].url
+    check built.url == base & "/api/v1/sessions?page=1&perPage=200"
+    check built.httpMethod == hmGet
+    check built.headers == recorder.requests[0].headers
+    check built.headerValue("Authorization") == "ApiKey k"
+
+  test "a listing answer is read as listSessions reads it":
+    let page = sessionListPageOf(ok(sessionsBody))
+    check page.items.len == 1
+    check page.items[0]["id"].getStr() == capturedId
+    check page.total == 1
+
+  test "a refused or unreadable listing answer raises, naming the status":
+    try:
+      discard sessionListPageOf(HttpResponse(status: 401, body: "{}"))
+      check false
+    except HarborError as error:
+      check "401" in error.msg
+    try:
+      discard sessionListPageOf(ok("not json"))
+      check false
+    except HarborError as error:
+      check "not JSON" in error.msg
+
+  test "the feed request is the one followSessionLifecycle sends":
+    let recorder = Recorder()
+    let client = newHarborClient(base, recorder.answering(
+      proc(req: HttpRequest): HttpResponse = ok(replayFeed)), apiKeyAuth("k"))
+    client.followSessionLifecycle(proc(frame: SseFrame): bool = true,
+      after = "ec97071de8b44550-1")
+    let built = client.lifecycleRequest(after = "ec97071de8b44550-1")
+    check built.url == recorder.requests[0].url
+    check built.headers == recorder.requests[0].headers
+    check client.lifecycleRequest().url == base & "/api/v1/session-lifecycle/events"

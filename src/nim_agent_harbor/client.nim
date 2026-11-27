@@ -326,18 +326,29 @@ proc parseBodyOrRaise(body, what: string): JsonNode =
   except:
     raise newException(HarborError, what & " is not JSON")
 
+proc listSessionsRequest*(client: HarborClient;
+    query = SessionListQuery()): HttpRequest =
+  ## The request `listSessions` sends, for a caller that carries it with a
+  ## transport of its own (a JavaScript host's `fetch`); read the answer
+  ## with `sessionListPageOf`.
+  newRequest(hmGet, client.baseUrl & sessionsPath(query), "",
+    @[header("Accept", "application/json")] & client.auth.authHeaders())
+
+proc sessionListPageOf*(response: HttpResponse): SessionListPage =
+  ## The page an answer to `listSessionsRequest` carries. A refusal or an
+  ## unreadable body raises `HarborError`, so a failed refresh never reads
+  ## as an empty fleet.
+  if response.status < 200 or response.status >= 300:
+    raise newException(HarborError, "Harbor session list failed (HTTP " &
+      $response.status & "): " & response.body)
+  sessionListPageFromJson(parseBodyOrRaise(response.body, "Harbor session list"))
+
 proc listSessions*(client: HarborClient;
     query = SessionListQuery()): SessionListPage =
   ## One page of `GET /api/v1/sessions`: the sessions the caller may list.
   ## A refusal or an unreadable body raises `HarborError`, so a failed
   ## refresh never reads as an empty fleet.
-  let response = client.transport.request(newRequest(hmGet,
-    client.baseUrl & sessionsPath(query), "",
-    @[header("Accept", "application/json")] & client.auth.authHeaders()))
-  if response.status < 200 or response.status >= 300:
-    raise newException(HarborError, "Harbor session list failed (HTTP " &
-      $response.status & "): " & response.body)
-  sessionListPageFromJson(parseBodyOrRaise(response.body, "Harbor session list"))
+  sessionListPageOf(client.transport.request(client.listSessionsRequest(query)))
 
 proc listAllSessions*(client: HarborClient; query = SessionListQuery();
     perPage = 200): seq[JsonNode] =
@@ -362,6 +373,13 @@ proc lifecyclePath(after: string): string =
   parts.addEncoded("after", after)
   "/api/v1/session-lifecycle/events" & queryJoin(parts)
 
+proc lifecycleRequest*(client: HarborClient; after = ""): HttpRequest =
+  ## The request `followSessionLifecycle` opens, for a caller that follows
+  ## the feed with a transport of its own (a JavaScript host's streaming
+  ## `fetch`) and reads its frames with an `SseReader`.
+  newRequest(hmGet, client.baseUrl & lifecyclePath(after), "",
+    @[header("Accept", "text/event-stream")] & client.auth.authHeaders())
+
 proc followSessionLifecycle*(client: HarborClient; onFrame: HarborFrameCallback;
     after = "") =
   ## Follows `GET /api/v1/session-lifecycle/events`, handing each frame to
@@ -371,8 +389,7 @@ proc followSessionLifecycle*(client: HarborClient; onFrame: HarborFrameCallback;
   ## after a valid `after` is over). `after` is the last cursor the caller
   ## applied, "" for none; it is sent as `?after=`, which the server prefers
   ## over `Last-Event-ID`.
-  let request = newRequest(hmGet, client.baseUrl & lifecyclePath(after), "",
-    @[header("Accept", "text/event-stream")] & client.auth.authHeaders())
+  let request = client.lifecycleRequest(after)
   if client.frameStreamTransport != nil:
     client.frameStreamTransport(request, onFrame)
     return
