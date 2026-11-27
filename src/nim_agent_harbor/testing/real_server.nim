@@ -1,11 +1,17 @@
-## Starts a private, real `ah server start` for the tests that check
-## nim-agent-harbor against the server itself (`test_real_server_*.nim`).
+## Starts a private, real `ah server start`, for tests that check a client of
+## Agent Harbor against the server itself: this repository's
+## `test_real_server_*.nim`, and the consumers' live-source tests. It is test
+## support, not part of the client: nothing in `nim_agent_harbor` imports it,
+## and a consumer imports `nim_agent_harbor/testing/real_server` explicitly.
 ##
 ## The server is the installed `agent-harbor` package, or the binary named by
 ## `AH_SERVER_BIN`. Its state lives in a fresh directory under `/tmp` that is
 ## also its `HOME` and XDG base, so it never sees the operator's own
 ## configuration, sessions or credentials, and it listens on a free loopback
 ## port. Native only: it spawns a process and talks plain HTTP.
+
+when defined(js):
+  {.error: "nim_agent_harbor/testing/real_server starts a process; it is native only".}
 
 import std/[monotimes, net, os, osproc, strtabs, strutils, tempfiles, times]
 from std/httpclient import nil
@@ -44,7 +50,8 @@ proc serverBinary*(): string =
   if result.len == 0:
     result = findExe("ah")
 
-proc freePort(): Port =
+proc freePort*(): Port =
+  ## A loopback port no one listens on at the moment of the call.
   let socket = newSocket()
   defer: socket.close()
   socket.bindAddr(Port(0), "127.0.0.1")
@@ -52,14 +59,16 @@ proc freePort(): Port =
 
 proc stop*(server: RealServer)
 
-proc startServer*(binary: string; apiKey = ""): RealServer =
+proc startServer*(binary: string; apiKey = ""; port = Port(0)): RealServer =
   ## Starts the server and waits for `/healthz`. A non-empty `apiKey` turns
-  ## REST authentication on (`AH_API_KEY`).
+  ## REST authentication on (`AH_API_KEY`). `port` 0 picks a free one; a
+  ## test that must know the address before the server exists (a client
+  ## started first, or a server restarted at the same address) passes one.
   # Unix socket paths must fit in SUN_LEN (108 bytes), so the server's state
   # lives under a short directory rather than the (often long) temp dir.
   result.root = createTempDir("ahk", "", "/tmp")
   let root = result.root
-  let port = freePort()
+  let port = if port == Port(0): freePort() else: port
   result.baseUrl = "http://127.0.0.1:" & $port.int
   let env = newStringTable(modeCaseSensitive)
   env["PATH"] = getEnv("PATH")

@@ -3,8 +3,8 @@
 ##
 ## `test_session_fleet.nim` pins the requests and the reading of captured
 ## responses; this test proves the same calls against the server itself. It
-## starts `ah server start` (see `real_ah_server.nim`) with authentication on,
-## and checks that:
+## starts `ah server start` (see `nim_agent_harbor/testing/real_server.nim`)
+## with authentication on, and checks that:
 ##
 ## - the list and the feed both need the client's credentials;
 ## - an empty server lists no sessions;
@@ -24,7 +24,7 @@ import std/[json, os, osproc, strutils]
 import unittest
 import nim_everywhere
 import nim_agent_harbor
-import ./real_ah_server
+import nim_agent_harbor/testing/real_server
 
 const apiKey = "nim-agent-harbor-fleet-key"
 

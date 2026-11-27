@@ -2,8 +2,8 @@
 ##
 ## The fake transport in `nim_agent_harbor/fake.nim` only models the header
 ## contract; this test proves it against the server itself. It starts
-## `ah server start` (see `real_ah_server.nim`) with `AH_API_KEY` set, which
-## turns REST authentication on, and checks that:
+## `ah server start` (see `nim_agent_harbor/testing/real_server.nim`) with
+## `AH_API_KEY` set, which turns REST authentication on, and checks that:
 ##
 ## - the client's `apiKeyAuth` creates a task (201);
 ## - `X-API-Key: <key>`, the header earlier client versions sent, gets 401;
@@ -20,7 +20,7 @@ import std/[json, os, strutils]
 import unittest
 import nim_everywhere
 import nim_agent_harbor
-import ./real_ah_server
+import nim_agent_harbor/testing/real_server
 
 const apiKey = "nim-agent-harbor-test-key"
 

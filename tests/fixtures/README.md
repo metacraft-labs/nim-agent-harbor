@@ -31,9 +31,10 @@ real-server test separately verifies the actual route and response fields.
 Captured on 2026-11-27 on a Linux workstation from a private `ah server start`
 (fresh `HOME` and XDG directories, no authentication, loopback port), using
 `/nix/store/gk6iq1vzw2daknrp4lldn2xcsrrqln3g-agent-harbor-cli-0.6.17/bin/ah`
-(`ah 0.6.17-dev`). The task was the one `real_ah_server.nim`'s `probeTask`
-builds (an ACP agent whose launch command is `true`), so the session fails
-at workspace preparation; that is enough to produce its whole lifecycle.
+(`ah 0.6.17-dev`). The task was the one `probeTask` in
+`src/nim_agent_harbor/testing/real_server.nim` builds (an ACP agent whose
+launch command is `true`), so the session fails at workspace preparation;
+that is enough to produce its whole lifecycle.
 
 Normalized: the session ID, the temporary repository path, and the host name
 in `handle`. Two free-text values that quote the server's internal log, the
