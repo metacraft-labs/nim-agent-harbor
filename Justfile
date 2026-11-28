@@ -11,6 +11,7 @@ build-native:
     nim c {{paths}} tests/test_real_server_auth.nim
     nim c {{paths}} tests/test_real_server_fleet.nim
     nim c {{paths}} tests/test_real_server_session_events.nim
+    nim c {{paths}} tests/test_real_server_cli.nim
     nim c {{paths}} tests/test_session_fleet.nim
     nim c {{paths}} tests/test_discovery.nim
     nim c {{paths}} tests/test_inbox.nim
@@ -32,6 +33,7 @@ test-native:
     nim c -r {{paths}} tests/test_real_server_auth.nim
     nim c -r {{paths}} tests/test_real_server_fleet.nim
     nim c -r {{paths}} tests/test_real_server_session_events.nim
+    nim c -r {{paths}} tests/test_real_server_cli.nim
     nim c -r {{paths}} tests/test_session_fleet.nim
     nim c -r {{paths}} tests/test_discovery.nim
     nim c -r {{paths}} tests/test_inbox.nim
@@ -56,6 +58,7 @@ lint-nim:
     nim check {{paths}} tests/test_real_server_auth.nim
     nim check {{paths}} tests/test_real_server_fleet.nim
     nim check {{paths}} tests/test_real_server_session_events.nim
+    nim check {{paths}} tests/test_real_server_cli.nim
     nim check {{paths}} tests/test_session_fleet.nim
     nim check {{paths}} tests/test_discovery.nim
     nim check {{paths}} tests/test_inbox.nim
